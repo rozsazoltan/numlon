@@ -1,0 +1,47 @@
+[package]
+name = "numlon"
+default-run = "numlon"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+build = "build.rs"
+license = "AGPL-3.0-or-later"
+description = "tiny tray app that keeps numlock in charge"
+repository = "https://github.com/rozsazoltan/numlon"
+
+[dependencies]
+anyhow = "1.0"
+reqwest = { version = "=0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "=0.35.0", default-features = false, features = ["default_fonts", "glow"] }
+global-hotkey = "=0.8.0"
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+tray-icon = { version = "=0.24.1", default-features = false, features = ["common-controls-v6"] }
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winresource = { version = "=0.1.31", default-features = false }
+
+[profile.dev]
+opt-level = 1
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
