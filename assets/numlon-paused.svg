@@ -1,18 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="80" y="80" width="864" height="864" rx="128" fill="#232833"/>
-  <g fill="#636C80">
-    <rect x="148" y="148" width="212" height="212" rx="46"/>
-    <rect x="406" y="148" width="212" height="212" rx="46"/>
-    <rect x="664" y="148" width="212" height="212" rx="46"/>
-    <rect x="148" y="406" width="212" height="212" rx="46"/>
-    <rect x="406" y="406" width="212" height="212" rx="46"/>
-    <rect x="148" y="664" width="212" height="212" rx="46"/>
-    <rect x="406" y="664" width="212" height="212" rx="46"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="64" y="64" width="896" height="896" rx="176" fill="#20242B"/>
+  <g fill="#687386">
+    <rect x="144" y="144" width="216" height="216" rx="52"/>
+    <rect x="404" y="144" width="216" height="216" rx="52"/>
+    <rect x="664" y="144" width="216" height="216" rx="52"/>
+    <rect x="144" y="404" width="216" height="216" rx="52"/>
+    <rect x="404" y="404" width="216" height="216" rx="52"/>
+    <rect x="144" y="664" width="216" height="216" rx="52"/>
+    <rect x="404" y="664" width="216" height="216" rx="52"/>
   </g>
-  <rect x="664" y="406" width="212" height="470" rx="46" fill="#D9DDE5"/>
-  <g fill="#232833">
-    <path d="M512 512"/>
-    <path d="M781.6 592.6v-37.5c0-45.8-37.1-82.9-82.9-82.9s-82.9 37.1-82.9 82.9v37.5c-16.2 7.6-27.4 24-27.4 43.1v94.9c0 26.3 21.3 47.6 47.6 47.6h125.6c26.3 0 47.6-21.3 47.6-47.6v-94.9c0-19.1-11.2-35.5-27.6-43.1zm-110.4-37.5c0-15.2 12.3-27.5 27.5-27.5s27.5 12.3 27.5 27.5v29.5h-55z"/>
-    <path d="M715.7 678.8c0 6.6-2.1 12.6-5.7 17.5v25.4c0 6.2-5.1 11.3-11.3 11.3s-11.3-5.1-11.3-11.3v-25.4c-3.6-4.9-5.7-10.9-5.7-17.5 0-16.1 13-29.1 29.1-29.1s28.9 13 28.9 29.1z"/>
+  <rect x="664" y="404" width="216" height="476" rx="52" fill="#A7AFBD"/>
+  <g fill="#20242B">
+    <rect x="718" y="592" width="108" height="126" rx="28"/>
+    <path d="M744 596v-38c0-45 36-81 81-81s81 36 81 81v38h-48v-38c0-19-15-34-33-34s-33 15-33 34v38z" transform="translate(-80 0)"/>
+    <circle cx="772" cy="650" r="18"/>
+    <rect x="762" y="650" width="20" height="38" rx="10"/>
   </g>
 </svg>

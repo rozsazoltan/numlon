@@ -15,9 +15,10 @@ use windows_sys::Win32::{
         },
         Gdi::{
             BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
-            Ellipse, EndPaint, FillRect, InvalidateRect, RoundRect, SelectObject, SetBkMode,
-            SetTextColor, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID, TRANSPARENT, DT_CENTER,
-            DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_TOP, DT_VCENTER, DT_WORDBREAK,
+            Ellipse, EndPaint, FillRect, InvalidateRect, RestoreDC, RoundRect, SaveDC,
+            SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, HBRUSH, HDC, HGDIOBJ,
+            PAINTSTRUCT, PS_SOLID, TRANSPARENT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT,
+            DT_SINGLELINE, DT_VCENTER,
         },
     },
     System::LibraryLoader::GetModuleHandleW,
@@ -32,18 +33,22 @@ use windows_sys::Win32::{
         WindowsAndMessaging::{
             AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
             DestroyWindow, DispatchMessageW, DrawIconEx, FindWindowW, GetClientRect, GetCursorPos,
-            GetMessageW, GetWindowLongPtrW, GetWindowRect, IsIconic, LoadCursorW, LoadIconW,
-            MessageBoxW,
-            PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow,
-            SetMenuDefaultItem, SetTimer, SetWindowLongPtrW, ShowWindow, TrackPopupMenu,
+            GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+            IsIconic, LoadCursorW, LoadIconW, LoadImageW, MessageBoxW, PostMessageW,
+            PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow, SetMenuDefaultItem,
+            SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TrackPopupMenu,
             TranslateMessage, CW_USEDEFAULT, DI_NORMAL, GWLP_USERDATA, HMENU, ICON_BIG,
-            ICON_SMALL, IDC_ARROW, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_POPUP,
-            MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, SW_HIDE, SW_RESTORE, SW_SHOW,
-            TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_ERASEBKGND,
-            WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NCDESTROY, WM_PAINT,
-            WM_RBUTTONUP, WM_SETICON, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSW, WS_CAPTION,
-            WS_EX_APPWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
-            WS_THICKFRAME,
+            ICON_SMALL, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, LR_SHARED, MF_CHECKED,
+            MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MINMAXINFO, MSG,
+            SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION,
+            SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE,
+            SIF_TRACKPOS, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SW_HIDE, SW_RESTORE,
+            SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE,
+            WM_COMMAND, WM_DESTROY, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
+            WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
+            WM_RBUTTONUP, WM_SETICON, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER, WM_VSCROLL, WNDCLASSW,
+            WS_CAPTION, WS_EX_APPWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED,
+            WS_SYSMENU, WS_THICKFRAME, WS_VSCROLL,
         },
     },
 };
@@ -55,6 +60,16 @@ use crate::{
     numlock, startup, updater,
     wide::{copy_wide_truncated, str_wide_null},
 };
+
+#[link(name = "user32")]
+extern "system" {
+    fn SetScrollInfo(
+        hwnd: HWND,
+        bar: i32,
+        info: *const SCROLLINFO,
+        redraw: i32,
+    ) -> i32;
+}
 
 pub const CLASS_NAME: &str = "NumlonWindowClass";
 
@@ -70,8 +85,11 @@ const ENFORCE_INTERVAL_MS: u32 = 300;
 const UPDATE_POLL_INTERVAL_MS: u32 = 250;
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
-const WINDOW_WIDTH: i32 = 612;
-const WINDOW_HEIGHT: i32 = 596;
+const CONTENT_WIDTH: i32 = 600;
+const CONTENT_HEIGHT: i32 = 500;
+const MIN_WINDOW_WIDTH: i32 = 620;
+const MIN_WINDOW_HEIGHT: i32 = 400;
+const SCROLL_STEP: i32 = 48;
 
 const MENU_OPEN: usize = 2001;
 const MENU_TOGGLE_ENABLED: usize = 2002;
@@ -85,14 +103,14 @@ const MENU_INSTALL_UPDATE: usize = 2009;
 const MENU_OPEN_RELEASES: usize = 2010;
 const MENU_EXIT: usize = 2011;
 
-const ENABLED_SWITCH: UiRect = UiRect::new(520, 98, 578, 130);
-const MODE_FORCE_ROW: UiRect = UiRect::new(28, 186, 582, 226);
-const MODE_LED_ROW: UiRect = UiRect::new(28, 232, 582, 272);
-const HOTKEY_BUTTON: UiRect = UiRect::new(450, 302, 578, 338);
-const STARTUP_SWITCH: UiRect = UiRect::new(520, 370, 578, 402);
-const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(520, 442, 578, 474);
-const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(418, 446, 506, 482);
-const HIDE_BUTTON: UiRect = UiRect::new(470, 540, 586, 574);
+const ENABLED_SWITCH: UiRect = UiRect::new(510, 92, 566, 122);
+const MODE_FORCE_ROW: UiRect = UiRect::new(28, 160, 286, 204);
+const MODE_LED_ROW: UiRect = UiRect::new(294, 160, 572, 204);
+const HOTKEY_BUTTON: UiRect = UiRect::new(452, 226, 572, 262);
+const STARTUP_SWITCH: UiRect = UiRect::new(510, 286, 566, 316);
+const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(510, 346, 566, 376);
+const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(410, 342, 496, 380);
+const HIDE_BUTTON: UiRect = UiRect::new(476, 444, 584, 480);
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
@@ -152,11 +170,17 @@ pub fn run() -> Result<()> {
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            WS_OVERLAPPED
+                | WS_CAPTION
+                | WS_SYSMENU
+                | WS_THICKFRAME
+                | WS_MINIMIZEBOX
+                | WS_MAXIMIZEBOX
+                | WS_VSCROLL,
             x,
             y,
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
+            CONTENT_WIDTH,
+            CONTENT_HEIGHT,
             ptr::null_mut(),
             ptr::null_mut(),
             instance,
@@ -167,6 +191,7 @@ pub fn run() -> Result<()> {
             anyhow::bail!("failed to create Numlon window: {}", GetLastError());
         }
 
+        resize_to_client(hwnd, CONTENT_WIDTH, CONTENT_HEIGHT);
         style_window(hwnd);
         set_window_icons(hwnd);
 
@@ -183,6 +208,7 @@ pub fn run() -> Result<()> {
             app.apply_runtime_mode();
             app.prompt_startup_on_first_run();
             app.maybe_start_auto_update_check();
+            app.update_scrollbar();
             app.repaint();
 
             if config::is_dev_build() || !started_from_startup() {
@@ -215,6 +241,7 @@ struct App {
     last_update_check: Option<updater::UpdateCheck>,
     update_rx: Option<Receiver<anyhow::Result<updater::UpdateCheck>>>,
     status: String,
+    scroll_offset: i32,
 }
 
 impl App {
@@ -234,6 +261,7 @@ impl App {
             last_update_check: None,
             update_rx: None,
             status,
+            scroll_offset: 0,
         }
     }
 
@@ -694,7 +722,73 @@ impl App {
         InvalidateRect(self.hwnd, ptr::null(), 0);
     }
 
+    unsafe fn update_scrollbar(&mut self) {
+        let mut client = RECT::default();
+        GetClientRect(self.hwnd, &mut client);
+        let viewport_height = (client.bottom - client.top).max(1);
+        let max_offset = (CONTENT_HEIGHT - viewport_height).max(0);
+        self.scroll_offset = self.scroll_offset.clamp(0, max_offset);
+
+        let mut info: SCROLLINFO = mem::zeroed();
+        info.cbSize = mem::size_of::<SCROLLINFO>() as u32;
+        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        info.nMin = 0;
+        info.nMax = CONTENT_HEIGHT.saturating_sub(1);
+        info.nPage = viewport_height as u32;
+        info.nPos = self.scroll_offset;
+        SetScrollInfo(self.hwnd, SB_VERT, &info, 1);
+    }
+
+    unsafe fn scroll_to(&mut self, position: i32) {
+        let mut client = RECT::default();
+        GetClientRect(self.hwnd, &mut client);
+        let viewport_height = (client.bottom - client.top).max(1);
+        let max_offset = (CONTENT_HEIGHT - viewport_height).max(0);
+        let position = position.clamp(0, max_offset);
+
+        if position == self.scroll_offset {
+            return;
+        }
+
+        self.scroll_offset = position;
+        self.update_scrollbar();
+        self.repaint();
+    }
+
+    unsafe fn scroll_by(&mut self, delta: i32) {
+        self.scroll_to(self.scroll_offset.saturating_add(delta));
+    }
+
+    unsafe fn handle_vscroll(&mut self, request: i32) {
+        match request {
+            SB_LINEUP => self.scroll_by(-SCROLL_STEP),
+            SB_LINEDOWN => self.scroll_by(SCROLL_STEP),
+            SB_PAGEUP => self.scroll_by(-CONTENT_HEIGHT / 2),
+            SB_PAGEDOWN => self.scroll_by(CONTENT_HEIGHT / 2),
+            SB_TOP => self.scroll_to(0),
+            SB_BOTTOM => self.scroll_to(CONTENT_HEIGHT),
+            SB_THUMBPOSITION | SB_THUMBTRACK => {
+                let mut info: SCROLLINFO = mem::zeroed();
+                info.cbSize = mem::size_of::<SCROLLINFO>() as u32;
+                info.fMask = SIF_TRACKPOS;
+                if GetScrollInfo(self.hwnd, SB_VERT, &mut info) != 0 {
+                    self.scroll_to(info.nTrackPos);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    unsafe fn content_origin_x(&self) -> i32 {
+        let mut client = RECT::default();
+        GetClientRect(self.hwnd, &mut client);
+        ((client.right - client.left - CONTENT_WIDTH) / 2).max(0)
+    }
+
     unsafe fn handle_click(&mut self, x: i32, y: i32) {
+        let x = x - self.content_origin_x();
+        let y = y + self.scroll_offset;
+
         if ENABLED_SWITCH.contains(x, y) {
             self.toggle_enabled();
         } else if MODE_FORCE_ROW.contains(x, y) {
@@ -863,41 +957,43 @@ impl App {
 
         let mut client = RECT::default();
         GetClientRect(self.hwnd, &mut client);
-        fill_rect(hdc, client, rgb(243, 243, 240));
+        fill_rect(hdc, client, rgb(245, 245, 243));
+
+        let saved_dc = SaveDC(hdc);
+        SetViewportOrgEx(
+            hdc,
+            self.content_origin_x(),
+            -self.scroll_offset,
+            ptr::null_mut(),
+        );
 
         draw_header(hdc);
-        self.draw_enabled_card(hdc);
-        self.draw_mode_card(hdc);
-        self.draw_hotkey_card(hdc);
-        self.draw_startup_card(hdc);
-        self.draw_updates_card(hdc);
+        draw_surface(hdc, UiRect::new(16, 74, 584, 410));
+        self.draw_enabled_row(hdc);
+        self.draw_behavior_row(hdc);
+        self.draw_hotkey_row(hdc);
+        self.draw_startup_row(hdc);
+        self.draw_updates_row(hdc);
         self.draw_footer(hdc);
 
+        if saved_dc != 0 {
+            RestoreDC(hdc, saved_dc);
+        }
         EndPaint(self.hwnd, &paint);
     }
 
-    unsafe fn draw_enabled_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 76, 594, 146), rgb(255, 255, 252));
-        draw_text(
-            hdc,
-            "NUMLOCK CONTROL",
-            UiRect::new(28, 88, 400, 104),
-            10,
-            700,
-            rgb(128, 128, 125),
-            DT_LEFT | DT_SINGLELINE,
-        );
+    unsafe fn draw_enabled_row(&self, hdc: HDC) {
         draw_text(
             hdc,
             if self.state.always_enabled {
-                "Numlon is on"
+                "Numlon active"
             } else {
-                "Numlon is paused"
+                "Numlon paused"
             },
-            UiRect::new(28, 106, 420, 128),
-            18,
+            UiRect::new(30, 88, 420, 110),
+            15,
             700,
-            rgb(28, 28, 30),
+            rgb(32, 33, 36),
             DT_LEFT | DT_SINGLELINE,
         );
         draw_text(
@@ -905,58 +1001,59 @@ impl App {
             if self.state.always_enabled {
                 self.state.numlock_mode.label()
             } else {
-                "Keyboard state remains untouched"
+                "Keyboard state remains unchanged"
             },
-            UiRect::new(28, 128, 420, 142),
-            10,
+            UiRect::new(30, 112, 430, 128),
+            11,
             400,
-            rgb(104, 104, 102),
+            rgb(96, 96, 100),
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_switch(hdc, ENABLED_SWITCH, self.state.always_enabled);
+        draw_divider(hdc, 30, 136, 570);
     }
 
-    unsafe fn draw_mode_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 156, 594, 284), rgb(255, 255, 252));
+    unsafe fn draw_behavior_row(&self, hdc: HDC) {
         draw_text(
             hdc,
             "Behavior",
-            UiRect::new(28, 168, 300, 186),
-            13,
-            700,
-            rgb(28, 28, 30),
+            UiRect::new(30, 144, 250, 160),
+            11,
+            600,
+            rgb(84, 84, 88),
             DT_LEFT | DT_SINGLELINE,
         );
 
-        draw_choice_row(
+        draw_compact_choice(
             hdc,
             MODE_FORCE_ROW,
             self.state.numlock_mode == NumlockMode::ForceOn,
-            "Keep NumLock on",
-            "Restores NumLock and keeps keypad in numeric mode.",
+            "NumLock on",
+            "Keeps keypad numeric",
             true,
         );
-        draw_choice_row(
+        draw_compact_choice(
             hdc,
             MODE_LED_ROW,
             self.state.numlock_mode == NumlockMode::LedOffDigits,
-            "Keep LED off, type digits",
-            "Remaps numpad navigation keys to 0–9 while NumLock stays off.",
+            "LED off",
+            "Maps keypad to digits",
             self.keyboard_hook.is_some(),
         );
+        draw_divider(hdc, 30, 216, 570);
     }
 
-    unsafe fn draw_hotkey_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 292, 594, 350), rgb(255, 255, 252));
+    unsafe fn draw_hotkey_row(&self, hdc: HDC) {
         draw_text(
             hdc,
             "Toggle shortcut",
-            UiRect::new(28, 304, 260, 322),
-            13,
-            700,
-            rgb(28, 28, 30),
+            UiRect::new(30, 228, 300, 248),
+            14,
+            600,
+            rgb(32, 33, 36),
             DT_LEFT | DT_SINGLELINE,
         );
+
         let hotkey_display = self.state.hotkey.display();
         let hotkey_text = if self.capturing_hotkey {
             "Press shortcut now. Esc cancels."
@@ -967,13 +1064,13 @@ impl App {
         draw_text(
             hdc,
             hotkey_text,
-            UiRect::new(28, 324, 404, 340),
-            13,
-            if self.capturing_hotkey { 700 } else { 500 },
+            UiRect::new(30, 250, 420, 268),
+            11,
+            if self.capturing_hotkey { 600 } else { 400 },
             if self.capturing_hotkey {
-                rgb(118, 88, 0)
+                rgb(125, 88, 0)
             } else {
-                rgb(72, 72, 70)
+                rgb(96, 96, 100)
             },
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
@@ -981,38 +1078,38 @@ impl App {
             hdc,
             HOTKEY_BUTTON,
             if self.capturing_hotkey {
-                "Listening…"
+                "Listening"
             } else {
                 "Change"
             },
             true,
         );
+        draw_divider(hdc, 30, 276, 570);
     }
 
-    unsafe fn draw_startup_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 360, 594, 418), rgb(255, 255, 252));
+    unsafe fn draw_startup_row(&self, hdc: HDC) {
         draw_text(
             hdc,
             "Start with Windows",
-            UiRect::new(28, 372, 420, 390),
-            13,
-            700,
-            rgb(28, 28, 30),
+            UiRect::new(30, 288, 380, 308),
+            14,
+            600,
+            rgb(32, 33, 36),
             DT_LEFT | DT_SINGLELINE,
         );
         draw_text(
             hdc,
             if config::is_dev_build() {
-                "Disabled in dev builds"
+                "Unavailable in development builds"
             } else if self.state.startup_enabled {
-                "Uses current executable path"
+                "Starts from current executable path"
             } else {
-                "Keep executable in final folder before enabling"
+                "Move executable to final folder before enabling"
             },
-            UiRect::new(28, 392, 470, 408),
-            10,
+            UiRect::new(30, 310, 460, 328),
+            11,
             400,
-            rgb(104, 104, 102),
+            rgb(96, 96, 100),
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_switch(
@@ -1020,29 +1117,29 @@ impl App {
             STARTUP_SWITCH,
             self.state.startup_enabled && !config::is_dev_build(),
         );
+        draw_divider(hdc, 30, 336, 570);
     }
 
-    unsafe fn draw_updates_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 430, 594, 490), rgb(255, 255, 252));
+    unsafe fn draw_updates_row(&self, hdc: HDC) {
         draw_text(
             hdc,
             "Updates",
-            UiRect::new(28, 442, 240, 460),
-            13,
-            700,
-            rgb(28, 28, 30),
+            UiRect::new(30, 348, 250, 368),
+            14,
+            600,
+            rgb(32, 33, 36),
             DT_LEFT | DT_SINGLELINE,
         );
 
         if config::is_dev_build() {
             draw_text(
                 hdc,
-                "Disabled in dev builds — no GitHub API requests.",
-                UiRect::new(28, 462, 392, 478),
-                10,
+                "Disabled in dev — no GitHub API requests",
+                UiRect::new(30, 370, 500, 388),
+                11,
                 400,
-                rgb(104, 104, 102),
-                DT_LEFT | DT_SINGLELINE,
+                rgb(96, 96, 100),
+                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
             return;
         }
@@ -1050,15 +1147,15 @@ impl App {
         draw_text(
             hdc,
             if self.state.include_prereleases {
-                "Prerelease channel"
+                "Prerelease channel included"
             } else {
-                "Stable channel"
+                "Stable releases only"
             },
-            UiRect::new(28, 462, 344, 478),
-            10,
+            UiRect::new(30, 370, 380, 388),
+            11,
             400,
-            rgb(104, 104, 102),
-            DT_LEFT | DT_SINGLELINE,
+            rgb(96, 96, 100),
+            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_button(
             hdc,
@@ -1077,14 +1174,15 @@ impl App {
         draw_text(
             hdc,
             &self.status,
-            UiRect::new(24, 516, 430, 574),
-            10,
+            UiRect::new(20, 438, 452, 478),
+            11,
             400,
-            rgb(96, 96, 93),
-            DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS,
+            rgb(88, 88, 92),
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_button(hdc, HIDE_BUTTON, "Hide", false);
     }
+
 }
 
 fn update_status(check: &updater::UpdateCheck) -> String {
@@ -1127,6 +1225,36 @@ unsafe extern "system" fn window_proc(
             }
         }
         WM_ERASEBKGND => 1,
+        WM_SIZE => {
+            if let Some(app) = app_from_hwnd(hwnd) {
+                app.update_scrollbar();
+                app.repaint();
+            }
+            0
+        }
+        WM_VSCROLL => {
+            if let Some(app) = app_from_hwnd(hwnd) {
+                app.handle_vscroll((wparam & 0xffff) as i32);
+            }
+            0
+        }
+        WM_MOUSEWHEEL => {
+            if let Some(app) = app_from_hwnd(hwnd) {
+                let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
+                if delta != 0 {
+                    app.scroll_by(-delta.signum() * SCROLL_STEP);
+                }
+            }
+            0
+        }
+        WM_GETMINMAXINFO => {
+            let info = lparam as *mut MINMAXINFO;
+            if !info.is_null() {
+                (*info).ptMinTrackSize.x = MIN_WINDOW_WIDTH;
+                (*info).ptMinTrackSize.y = MIN_WINDOW_HEIGHT;
+            }
+            0
+        }
         WM_LBUTTONUP => {
             if let Some(app) = app_from_hwnd(hwnd) {
                 let (x, y) = point_from_lparam(lparam);
@@ -1209,9 +1337,37 @@ unsafe extern "system" fn window_proc(
 }
 
 
+unsafe fn resize_to_client(hwnd: HWND, client_width: i32, client_height: i32) {
+    let mut window = RECT::default();
+    let mut client = RECT::default();
+    if GetWindowRect(hwnd, &mut window) == 0 || GetClientRect(hwnd, &mut client) == 0 {
+        return;
+    }
+
+    let frame_width = (window.right - window.left) - (client.right - client.left);
+    let frame_height = (window.bottom - window.top) - (client.bottom - client.top);
+    SetWindowPos(
+        hwnd,
+        ptr::null_mut(),
+        0,
+        0,
+        client_width + frame_width,
+        client_height + frame_height,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+}
+
 unsafe fn set_window_icons(hwnd: HWND) {
-    let large_icon = load_app_icon();
-    let small_icon = load_app_icon();
+    let large_icon = load_icon_resource_sized(
+        APP_ICON_RESOURCE_ID,
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON),
+    );
+    let small_icon = load_icon_resource_sized(
+        APP_ICON_RESOURCE_ID,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+    );
     SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, large_icon as isize);
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, small_icon as isize);
 }
@@ -1252,10 +1408,10 @@ unsafe fn draw_header(hdc: HDC) {
     DrawIconEx(
         hdc,
         20,
-        14,
-        load_app_icon(),
-        44,
-        44,
+        16,
+        load_icon_resource_sized(APP_ICON_RESOURCE_ID, 40, 40),
+        40,
+        40,
         0,
         ptr::null_mut(),
         DI_NORMAL,
@@ -1263,33 +1419,52 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Numlon",
-        UiRect::new(78, 16, 360, 40),
+        UiRect::new(72, 14, 360, 38),
         20,
         700,
-        rgb(28, 28, 30),
+        rgb(32, 33, 36),
         DT_LEFT | DT_SINGLELINE,
     );
     draw_text(
         hdc,
-        "Tiny keypad control, without LED drama.",
-        UiRect::new(78, 40, 430, 58),
-        12,
+        "NumLock control for Windows",
+        UiRect::new(72, 40, 420, 58),
+        11,
         400,
-        rgb(104, 104, 102),
+        rgb(96, 96, 100),
         DT_LEFT | DT_SINGLELINE,
     );
     draw_pill(
         hdc,
-        UiRect::new(458, 18, 586, 48),
+        UiRect::new(474, 18, 584, 48),
         &config::app_version_label(),
     );
 }
 
-unsafe fn draw_card(hdc: HDC, rect: UiRect, fill: COLORREF) {
-    draw_rounded_rect(hdc, rect, 20, fill, rgb(230, 230, 226));
+unsafe fn draw_surface(hdc: HDC, rect: UiRect) {
+    draw_rounded_rect(
+        hdc,
+        rect,
+        14,
+        rgb(255, 255, 255),
+        rgb(224, 224, 226),
+    );
 }
 
-unsafe fn draw_choice_row(
+unsafe fn draw_divider(hdc: HDC, left: i32, top: i32, right: i32) {
+    fill_rect(
+        hdc,
+        RECT {
+            left,
+            top,
+            right,
+            bottom: top + 1,
+        },
+        rgb(232, 232, 234),
+    );
+}
+
+unsafe fn draw_compact_choice(
     hdc: HDC,
     rect: UiRect,
     selected: bool,
@@ -1298,43 +1473,47 @@ unsafe fn draw_choice_row(
     enabled: bool,
 ) {
     let fill = if selected {
-        rgb(255, 248, 214)
+        rgb(255, 247, 214)
     } else {
-        rgb(250, 250, 248)
+        rgb(248, 248, 249)
     };
     let border = if selected {
-        rgb(255, 200, 32)
+        rgb(255, 185, 0)
     } else {
-        rgb(235, 235, 232)
+        rgb(224, 224, 226)
     };
-    draw_rounded_rect(hdc, rect, 14, fill, border);
-    draw_radio(hdc, UiRect::new(rect.left + 14, rect.top + 16, rect.left + 34, rect.top + 36), selected);
+    draw_rounded_rect(hdc, rect, 10, fill, border);
+    draw_radio(
+        hdc,
+        UiRect::new(rect.left + 12, rect.top + 13, rect.left + 30, rect.top + 31),
+        selected,
+    );
 
     let title_color = if enabled {
-        rgb(28, 28, 30)
+        rgb(32, 33, 36)
     } else {
-        rgb(150, 150, 146)
+        rgb(148, 148, 152)
     };
     let subtitle_color = if enabled {
-        rgb(104, 104, 102)
+        rgb(96, 96, 100)
     } else {
-        rgb(166, 166, 162)
+        rgb(164, 164, 168)
     };
 
     draw_text(
         hdc,
         title,
-        UiRect::new(rect.left + 48, rect.top + 8, rect.right - 16, rect.top + 28),
-        13,
-        700,
+        UiRect::new(rect.left + 40, rect.top + 7, rect.right - 10, rect.top + 23),
+        12,
+        600,
         title_color,
         DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
     );
     draw_text(
         hdc,
         subtitle,
-        UiRect::new(rect.left + 48, rect.top + 29, rect.right - 16, rect.bottom - 5),
-        11,
+        UiRect::new(rect.left + 40, rect.top + 24, rect.right - 10, rect.bottom - 5),
+        10,
         400,
         subtitle_color,
         DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -1554,20 +1733,39 @@ unsafe fn draw_text(
 }
 
 unsafe fn load_app_icon() -> *mut std::ffi::c_void {
-    load_icon_resource(APP_ICON_RESOURCE_ID)
+    load_icon_resource_sized(
+        APP_ICON_RESOURCE_ID,
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON),
+    )
 }
 
 unsafe fn load_tray_icon(enabled: bool) -> *mut std::ffi::c_void {
-    load_icon_resource(if enabled {
-        APP_ICON_RESOURCE_ID
-    } else {
-        PAUSED_ICON_RESOURCE_ID
-    })
+    load_icon_resource_sized(
+        if enabled {
+            APP_ICON_RESOURCE_ID
+        } else {
+            PAUSED_ICON_RESOURCE_ID
+        },
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+    )
 }
 
-unsafe fn load_icon_resource(resource_id: u16) -> *mut std::ffi::c_void {
+unsafe fn load_icon_resource_sized(
+    resource_id: u16,
+    width: i32,
+    height: i32,
+) -> *mut std::ffi::c_void {
     let instance = GetModuleHandleW(ptr::null());
-    let icon = LoadIconW(instance, make_int_resource(resource_id));
+    let icon = LoadImageW(
+        instance,
+        make_int_resource(resource_id),
+        IMAGE_ICON,
+        width.max(1),
+        height.max(1),
+        LR_SHARED,
+    );
     if icon.is_null() {
         LoadIconW(ptr::null_mut(), IDI_APPLICATION)
     } else {

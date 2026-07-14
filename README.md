@@ -95,7 +95,7 @@ Development builds perform no automatic or manual GitHub API update checks.
 Primary accent:
 
 ```text
-#FACC15
+#FFB900
 ```
 
 Executable and tray icon assets:
@@ -107,7 +107,7 @@ assets/numlon.ico
 assets/numlon-paused.ico
 ```
 
-`build.rs` embeds `assets/numlon.ico` into Windows executable.
+`build.rs` embeds multi-size `assets/numlon.ico` into Windows executable. The ICO contains hand-tuned 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 pixel frames. `assets/numlon.svg` remains vector source.
 
 ## Get started
 
@@ -186,7 +186,7 @@ Prerelease mode selects newest non-draft prerelease. Stable mode uses latest sta
 
 ## Window behavior
 
-Numlon uses native Windows APIs with custom card-based UI, rounded Windows 11 frame, yellow accent, and embedded icon.
+Numlon uses native Windows APIs with a compact Fluent-style settings surface, rounded Windows 11 frame, yellow accent, resizable window, vertical overflow scrolling, and embedded multi-size icons.
 
 Development build title includes current package version and `dev`, for example:
 
