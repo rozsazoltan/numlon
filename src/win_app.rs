@@ -12,11 +12,17 @@ use std::{
     time::{Duration, Instant},
 };
 use tray_icon::{
-    menu::{IconMenuItem, Menu, MenuEvent},
+    menu::{
+        CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
+    },
     Icon as TrayImage, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+use windows_sys::Win32::{
+    Foundation::HANDLE,
+    System::Threading::GetCurrentProcess,
+    UI::WindowsAndMessaging::{
+        FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+    },
 };
 
 use crate::{
@@ -28,8 +34,15 @@ use crate::{
 };
 
 const ENFORCE_INTERVAL: Duration = Duration::from_millis(300);
-const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(80);
+const VISIBLE_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(80);
+const HIDDEN_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const WORKING_SET_TRIM_DELAY: Duration = Duration::from_millis(600);
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
+const DEFAULT_WINDOW_WIDTH: f32 = 620.0;
+const CONTENT_WINDOW_HEIGHT: f32 = 552.0;
+const FALLBACK_MIN_WINDOW_WIDTH: f32 = 520.0;
+const FALLBACK_MIN_WINDOW_HEIGHT: f32 = 420.0;
+const MONITOR_EDGE_RESERVE: f32 = 96.0;
 
 const BACKGROUND: Color32 = Color32::from_rgb(246, 246, 244);
 const SURFACE: Color32 = Color32::from_rgb(255, 255, 255);
@@ -37,8 +50,8 @@ const SURFACE_MUTED: Color32 = Color32::from_rgb(249, 249, 247);
 const BORDER: Color32 = Color32::from_rgb(226, 226, 223);
 const TEXT: Color32 = Color32::from_rgb(28, 28, 30);
 const MUTED: Color32 = Color32::from_rgb(103, 103, 100);
-const YELLOW: Color32 = Color32::from_rgb(255, 201, 40);
-const YELLOW_SOFT: Color32 = Color32::from_rgb(255, 248, 218);
+const YELLOW: Color32 = Color32::from_rgb(255, 210, 31);
+const YELLOW_SOFT: Color32 = Color32::from_rgb(255, 250, 221);
 const GRAPHITE: Color32 = Color32::from_rgb(37, 41, 50);
 
 const MENU_OPEN: &str = "open";
@@ -52,6 +65,11 @@ const MENU_CHECK: &str = "check";
 const MENU_INSTALL: &str = "install";
 const MENU_RELEASES: &str = "releases";
 const MENU_QUIT: &str = "quit";
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn K32EmptyWorkingSet(process: HANDLE) -> i32;
+}
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
@@ -78,8 +96,11 @@ pub fn run() -> Result<()> {
     let visible = config::is_dev_build() || !started_from_startup();
     let viewport = egui::ViewportBuilder::default()
         .with_title(config::window_title())
-        .with_inner_size([620.0, 520.0])
-        .with_min_inner_size([520.0, 420.0])
+        .with_inner_size([DEFAULT_WINDOW_WIDTH, CONTENT_WINDOW_HEIGHT])
+        .with_min_inner_size([
+            FALLBACK_MIN_WINDOW_WIDTH,
+            FALLBACK_MIN_WINDOW_HEIGHT,
+        ])
         .with_resizable(true)
         .with_visible(visible)
         .with_icon(icon);
@@ -95,44 +116,73 @@ pub fn run() -> Result<()> {
     eframe::run_native(
         config::app_name(),
         options,
-        Box::new(|creation_context| Ok(Box::new(NumlonApp::new(creation_context)))),
+        Box::new(move |creation_context| {
+            Ok(Box::new(NumlonApp::new(creation_context, visible)))
+        }),
     )
     .map_err(|error| anyhow::anyhow!("failed to run Numlon UI: {error}"))
 }
 
 struct TrayState {
     icon: TrayIcon,
-    toggle: IconMenuItem,
-    force: IconMenuItem,
-    led_off: IconMenuItem,
-    shortcut: IconMenuItem,
-    startup: IconMenuItem,
-    prerelease: Option<IconMenuItem>,
-    install: Option<IconMenuItem>,
+    toggle: CheckMenuItem,
+    force: CheckMenuItem,
+    led_off: CheckMenuItem,
+    shortcut: MenuItem,
+    startup: CheckMenuItem,
+    prerelease: Option<CheckMenuItem>,
+    install: Option<MenuItem>,
 }
 
 impl TrayState {
     fn new(state: &SavedState, keyboard_hook_available: bool) -> Result<Self> {
         let menu = Menu::new();
-        let open = IconMenuItem::with_id(MENU_OPEN, "Open Numlon", true, None, None);
-        let toggle = IconMenuItem::with_id(MENU_TOGGLE, "", true, None, None);
-        let force = IconMenuItem::with_id(MENU_FORCE, "", true, None, None);
-        let led_off = IconMenuItem::with_id(MENU_LED_OFF, "", keyboard_hook_available, None, None);
-        let shortcut = IconMenuItem::with_id(MENU_SHORTCUT, "", true, None, None);
-        let startup = IconMenuItem::with_id(
-            MENU_STARTUP,
-            "",
-            !config::is_dev_build(),
-            None,
+        let open = MenuItem::with_id(MENU_OPEN, "Open Numlon", true, None);
+        let separator_after_open = PredefinedMenuItem::separator();
+        let toggle = CheckMenuItem::with_id(
+            MENU_TOGGLE,
+            "Enabled",
+            true,
+            state.always_enabled,
             None,
         );
-        let quit = IconMenuItem::with_id(MENU_QUIT, "Quit Numlon", true, None, None);
+
+        let force = CheckMenuItem::with_id(
+            MENU_FORCE,
+            "Keep NumLock on",
+            true,
+            state.numlock_mode == NumlockMode::ForceOn,
+            None,
+        );
+        let led_off = CheckMenuItem::with_id(
+            MENU_LED_OFF,
+            "Keep LED off, type digits",
+            keyboard_hook_available,
+            state.numlock_mode == NumlockMode::LedOffDigits,
+            None,
+        );
+        let behavior = Submenu::new("Behavior", true);
+        behavior.append_items(&[&force, &led_off])?;
+
+        let shortcut = MenuItem::with_id(
+            MENU_SHORTCUT,
+            format!("Change shortcut…  {}", state.hotkey.display()),
+            true,
+            None,
+        );
+        let startup = CheckMenuItem::with_id(
+            MENU_STARTUP,
+            "Start with Windows",
+            !config::is_dev_build(),
+            state.startup_enabled && !config::is_dev_build(),
+            None,
+        );
 
         menu.append_items(&[
             &open,
+            &separator_after_open,
             &toggle,
-            &force,
-            &led_off,
+            &behavior,
             &shortcut,
             &startup,
         ])?;
@@ -140,32 +190,42 @@ impl TrayState {
         let (prerelease, install) = if config::is_dev_build() {
             (None, None)
         } else {
-            let prerelease = IconMenuItem::with_id(MENU_PRERELEASE, "", true, None, None);
-            let check = IconMenuItem::with_id(MENU_CHECK, "Check for updates", true, None, None);
-            let install = IconMenuItem::with_id(
+            let separator_updates = PredefinedMenuItem::separator();
+            let prerelease = CheckMenuItem::with_id(
+                MENU_PRERELEASE,
+                "Include prereleases",
+                true,
+                state.include_prereleases,
+                None,
+            );
+            let check = MenuItem::with_id(MENU_CHECK, "Check for updates", true, None);
+            let install = MenuItem::with_id(
                 MENU_INSTALL,
                 "Install available update",
                 false,
                 None,
-                None,
             );
-            let releases =
-                IconMenuItem::with_id(MENU_RELEASES, "Open releases", true, None, None);
-            menu.append_items(&[&prerelease, &check, &install, &releases])?;
+            let releases = MenuItem::with_id(MENU_RELEASES, "Open releases", true, None);
+            menu.append_items(&[
+                &separator_updates,
+                &prerelease,
+                &check,
+                &install,
+                &releases,
+            ])?;
             (Some(prerelease), Some(install))
         };
-        menu.append(&quit)?;
+
+        let separator_quit = PredefinedMenuItem::separator();
+        let quit = MenuItem::with_id(MENU_QUIT, "Quit Numlon", true, None);
+        menu.append_items(&[&separator_quit, &quit])?;
 
         let icon = TrayIconBuilder::new()
             .with_id("numlon")
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
             .with_menu_on_right_click(true)
-            .with_icon(load_tray_image(if state.always_enabled {
-                include_bytes!("../assets/numlon-tray.png")
-            } else {
-                include_bytes!("../assets/numlon-paused-tray.png")
-            })?)
+            .with_icon(load_tray_image(include_bytes!("../assets/numlon-tray.png"))?)
             .with_tooltip(tray_tooltip(state))
             .build()?;
 
@@ -184,45 +244,24 @@ impl TrayState {
     }
 
     fn sync(&self, state: &SavedState, keyboard_hook_available: bool, update_installable: bool) {
-        self.toggle.set_text(if state.always_enabled {
-            "✓ Numlon enabled"
-        } else {
-            "Numlon paused"
-        });
-        self.force.set_text(if state.numlock_mode == NumlockMode::ForceOn {
-            "✓ Keep NumLock on"
-        } else {
-            "Keep NumLock on"
-        });
-        self.led_off.set_text(if state.numlock_mode == NumlockMode::LedOffDigits {
-            "✓ Keep LED off, type digits"
-        } else {
-            "Keep LED off, type digits"
-        });
+        self.toggle.set_checked(state.always_enabled);
+        self.force
+            .set_checked(state.numlock_mode == NumlockMode::ForceOn);
+        self.led_off
+            .set_checked(state.numlock_mode == NumlockMode::LedOffDigits);
         self.led_off.set_enabled(keyboard_hook_available);
         self.shortcut
             .set_text(format!("Change shortcut…  {}", state.hotkey.display()));
-        self.startup.set_text(if state.startup_enabled {
-            "✓ Start with Windows"
-        } else {
-            "Start with Windows"
-        });
+        self.startup
+            .set_checked(state.startup_enabled && !config::is_dev_build());
         if let Some(prerelease) = &self.prerelease {
-            prerelease.set_text(if state.include_prereleases {
-                "✓ Include prereleases"
-            } else {
-                "Include prereleases"
-            });
+            prerelease.set_checked(state.include_prereleases);
         }
         if let Some(install) = &self.install {
             install.set_enabled(update_installable);
         }
 
-        let icon = load_tray_image(if state.always_enabled {
-            include_bytes!("../assets/numlon-tray.png")
-        } else {
-            include_bytes!("../assets/numlon-paused-tray.png")
-        });
+        let icon = load_tray_image(include_bytes!("../assets/numlon-tray.png"));
         if let Ok(icon) = icon {
             let _ = self.icon.set_icon(Some(icon));
         }
@@ -240,13 +279,19 @@ struct NumlonApp {
     capturing_hotkey: bool,
     startup_prompt_open: bool,
     quit_requested: bool,
+    window_visible: bool,
+    viewport_constraints_applied: bool,
+    working_set_trim_at: Option<Instant>,
     last_enforce: Instant,
     last_update_check: Option<updater::UpdateCheck>,
     update_rx: Option<Receiver<anyhow::Result<updater::UpdateCheck>>>,
 }
 
 impl NumlonApp {
-    fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
+    fn new(
+        creation_context: &eframe::CreationContext<'_>,
+        window_visible: bool,
+    ) -> Self {
         configure_egui(&creation_context.egui_ctx);
 
         let mut state = config::load_state();
@@ -296,6 +341,9 @@ impl NumlonApp {
             capturing_hotkey: false,
             startup_prompt_open,
             quit_requested: false,
+            window_visible,
+            viewport_constraints_applied: false,
+            working_set_trim_at: None,
             last_enforce: Instant::now() - ENFORCE_INTERVAL,
             last_update_check: None,
             update_rx: None,
@@ -304,9 +352,11 @@ impl NumlonApp {
         app.apply_runtime_mode();
         app.maybe_start_auto_update_check();
         app.sync_tray();
-        creation_context
-            .egui_ctx
-            .request_repaint_after(EVENT_POLL_INTERVAL);
+        creation_context.egui_ctx.request_repaint_after(if window_visible {
+            VISIBLE_EVENT_POLL_INTERVAL
+        } else {
+            HIDDEN_EVENT_POLL_INTERVAL
+        });
         app
     }
 
@@ -352,13 +402,18 @@ impl NumlonApp {
         }
     }
 
-    fn show_window(&self, ctx: &egui::Context) {
+    fn show_window(&mut self, ctx: &egui::Context) {
+        self.window_visible = true;
+        self.working_set_trim_at = None;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        ctx.request_repaint();
     }
 
     fn hide_window(&mut self, ctx: &egui::Context) {
         self.save();
+        self.window_visible = false;
+        self.working_set_trim_at = Some(Instant::now() + WORKING_SET_TRIM_DELAY);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
@@ -673,6 +728,46 @@ impl NumlonApp {
         }
     }
 
+    fn apply_viewport_constraints(&mut self, ctx: &egui::Context) {
+        if self.viewport_constraints_applied {
+            return;
+        }
+
+        let monitor_height = ctx
+            .input(|input| input.viewport().monitor_size.map(|size| size.y))
+            .unwrap_or(CONTENT_WINDOW_HEIGHT + MONITOR_EDGE_RESERVE);
+        let available_height =
+            (monitor_height - MONITOR_EDGE_RESERVE).max(FALLBACK_MIN_WINDOW_HEIGHT);
+        let target_height = CONTENT_WINDOW_HEIGHT.min(available_height);
+        let minimum_height = if available_height >= CONTENT_WINDOW_HEIGHT {
+            CONTENT_WINDOW_HEIGHT
+        } else {
+            FALLBACK_MIN_WINDOW_HEIGHT.min(target_height)
+        };
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+            FALLBACK_MIN_WINDOW_WIDTH,
+            minimum_height,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            DEFAULT_WINDOW_WIDTH,
+            target_height,
+        )));
+        self.viewport_constraints_applied = true;
+    }
+
+    fn trim_hidden_working_set(&mut self) {
+        let Some(trim_at) = self.working_set_trim_at else {
+            return;
+        };
+        if self.window_visible || Instant::now() < trim_at {
+            return;
+        }
+
+        self.working_set_trim_at = None;
+        trim_process_working_set();
+    }
+
     fn render_startup_prompt(&mut self, ctx: &egui::Context) {
         if !self.startup_prompt_open {
             return;
@@ -714,12 +809,18 @@ impl eframe::App for NumlonApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.hide_window(ctx);
         }
+        self.apply_viewport_constraints(ctx);
         self.poll_global_hotkey();
         self.poll_tray(ctx);
         self.poll_hotkey_capture(ctx);
         self.enforce_numlock();
         self.poll_update_check();
-        ctx.request_repaint_after(EVENT_POLL_INTERVAL);
+        self.trim_hidden_working_set();
+        ctx.request_repaint_after(if self.window_visible {
+            VISIBLE_EVENT_POLL_INTERVAL
+        } else {
+            HIDDEN_EVENT_POLL_INTERVAL
+        });
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -829,17 +930,23 @@ fn configure_egui(ctx: &egui::Context) {
 }
 
 fn header(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        draw_logo(ui, 44.0, true);
-        ui.add_space(4.0);
-        ui.vertical(|ui| {
-            ui.label(RichText::new("Numlon").size(21.0).strong().color(TEXT));
-            ui.label(
-                RichText::new("Tiny keypad control, without LED drama.")
-                    .size(11.5)
-                    .color(MUTED),
-            );
-        });
+    ui.horizontal_centered(|ui| {
+        draw_logo(ui, 44.0);
+        ui.add_space(8.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(330.0, 44.0),
+            Layout::top_down(Align::LEFT),
+            |ui| {
+                ui.add_space(3.0);
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.label(RichText::new("Numlon").size(21.0).strong().color(TEXT));
+                ui.label(
+                    RichText::new("Tiny keypad control, without LED drama.")
+                        .size(11.5)
+                        .color(MUTED),
+                );
+            },
+        );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             egui::Frame::new()
                 .fill(YELLOW_SOFT)
@@ -859,40 +966,28 @@ fn header(ui: &mut egui::Ui) {
 }
 
 fn status_card(ui: &mut egui::Ui, app: &mut NumlonApp) {
+    let title = if app.state.always_enabled {
+        "Numlon active"
+    } else {
+        "Numlon paused"
+    };
+    let subtitle = if app.state.always_enabled {
+        app.state.numlock_mode.label()
+    } else {
+        "Keyboard state remains untouched"
+    };
+
     egui::Frame::new()
         .fill(SURFACE)
         .stroke(Stroke::new(1.0, BORDER))
         .corner_radius(egui::CornerRadius::same(12))
-        .inner_margin(egui::Margin::symmetric(14, 12))
+        .inner_margin(egui::Margin::symmetric(14, 4))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(if app.state.always_enabled {
-                            "Numlon active"
-                        } else {
-                            "Numlon paused"
-                        })
-                        .size(15.0)
-                        .strong()
-                        .color(TEXT),
-                    );
-                    ui.label(
-                        RichText::new(if app.state.always_enabled {
-                            app.state.numlock_mode.label()
-                        } else {
-                            "Keyboard state remains untouched"
-                        })
-                        .size(11.0)
-                        .color(MUTED),
-                    );
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let response = toggle_switch(ui, app.state.always_enabled, true);
-                    if response.clicked() {
-                        app.toggle_enabled();
-                    }
-                });
+            setting_row(ui, title, subtitle, |ui| {
+                let response = toggle_switch(ui, app.state.always_enabled, true);
+                if response.clicked() {
+                    app.toggle_enabled();
+                }
             });
         });
 }
@@ -931,14 +1026,14 @@ fn mode_option(
     }
     let color = if enabled { TEXT } else { MUTED };
     ui.painter().text(
-        egui::pos2(rect.left() + 38.0, rect.top() + 14.0),
+        egui::pos2(rect.left() + 38.0, rect.center().y - 9.0),
         Align2::LEFT_CENTER,
         title,
         FontId::proportional(12.5),
         color,
     );
     ui.painter().text(
-        egui::pos2(rect.left() + 38.0, rect.top() + 35.0),
+        egui::pos2(rect.left() + 38.0, rect.center().y + 10.0),
         Align2::LEFT_CENTER,
         subtitle,
         FontId::proportional(10.5),
@@ -1047,10 +1142,17 @@ fn setting_row(
         egui::vec2(ui.available_width(), 58.0),
         Layout::left_to_right(Align::Center),
         |ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new(title).size(13.0).strong().color(TEXT));
-                ui.label(RichText::new(subtitle).size(10.5).color(MUTED));
-            });
+            let text_width = (ui.available_width() - 132.0).max(180.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(text_width, 58.0),
+                Layout::top_down(Align::LEFT),
+                |ui| {
+                    ui.add_space(10.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(RichText::new(title).size(13.0).strong().color(TEXT));
+                    ui.label(RichText::new(subtitle).size(10.5).color(MUTED));
+                },
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), trailing);
         },
     );
@@ -1078,26 +1180,26 @@ fn toggle_switch(ui: &mut egui::Ui, on: bool, enabled: bool) -> egui::Response {
     response
 }
 
-fn draw_logo(ui: &mut egui::Ui, size: f32, active: bool) {
+fn draw_logo(ui: &mut egui::Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 8, GRAPHITE);
-    let gap = size * 0.085;
-    let padding = size * 0.18;
-    let key = (size - padding * 2.0 - gap * 2.0) / 3.0;
+    painter.rect_filled(rect, 10, GRAPHITE);
+
+    let padding = size * 0.20;
+    let gap = size * 0.075;
+    let key_size = (size - padding * 2.0 - gap * 2.0) / 3.0;
     for row in 0..3 {
         for column in 0..3 {
             let min = egui::pos2(
-                rect.left() + padding + column as f32 * (key + gap),
-                rect.top() + padding + row as f32 * (key + gap),
+                rect.left() + padding + column as f32 * (key_size + gap),
+                rect.top() + padding + row as f32 * (key_size + gap),
             );
-            let key_rect = egui::Rect::from_min_size(min, egui::vec2(key, key));
-            let is_active = row == 2 && column == 2;
+            let key_rect = egui::Rect::from_min_size(min, egui::vec2(key_size, key_size));
             painter.rect_filled(
                 key_rect,
                 2,
-                if is_active {
-                    if active { YELLOW } else { Color32::from_rgb(139, 145, 157) }
+                if row == 2 && column == 2 {
+                    YELLOW
                 } else {
                     Color32::from_rgb(233, 235, 239)
                 },
@@ -1141,10 +1243,24 @@ fn tray_tooltip(state: &SavedState) -> String {
 }
 
 fn update_status(check: &updater::UpdateCheck) -> String {
-    if check.is_update_available {
-        format!("Update available: v{}.", check.latest_version)
+    let channel = if check.prerelease {
+        "prerelease"
     } else {
-        format!("No newer release. Current version: v{}.", check.current_version)
+        "stable"
+    };
+    if check.is_update_available {
+        format!("{channel} update available: v{}.", check.latest_version)
+    } else {
+        format!(
+            "No newer {channel} release. Current version: v{}.",
+            check.current_version
+        )
+    }
+}
+
+fn trim_process_working_set() {
+    unsafe {
+        let _ = K32EmptyWorkingSet(GetCurrentProcess());
     }
 }
 

@@ -66,7 +66,7 @@ The shortcut is stored next to the executable in `.numlon-data/config.json`.
 
 ### Tray mode
 
-Numlon lives in Windows notification area. Yellow keypad tray icon opens app on left click. Paused state uses same geometry with muted accent. Right click menu provides:
+Numlon lives in Windows notification area. Same keypad icon is used for executable, desktop shortcut, taskbar, title bar, and tray. One equal keypad square uses lemon yellow. Left click opens app. Right click menu provides:
 
 - enabled state
 - behavior mode
@@ -96,23 +96,19 @@ Development builds perform no automatic or manual GitHub API update checks.
 Primary accent:
 
 ```text
-#FFC928
+#FFD21F
 ```
 
-Executable, window, taskbar, and tray icon assets:
+Canonical icon and generated platform assets:
 
 ```text
 assets/numlon.svg
-assets/numlon-paused.svg
 assets/numlon.png
-assets/numlon-paused.png
 assets/numlon-tray.png
-assets/numlon-paused-tray.png
 assets/numlon.ico
-assets/numlon-paused.ico
 ```
 
-SVG files are canonical vector sources. Eframe uses embedded PNG icon data for its native window. Windows shell and executable metadata use multi-size ICO resources. Tray uses dedicated 32 px PNGs instead of scaling a large desktop icon at runtime.
+`numlon.svg` is canonical vector source. All raster assets use same 3×3 equal-square keypad geometry. Bottom-right square is lemon yellow. No gradient, shadow, lock, or alternate tray geometry. ICO contains dedicated Windows sizes; tray uses dedicated 32 px PNG.
 
 ## Get started
 
@@ -193,7 +189,7 @@ Prerelease mode selects newest non-draft prerelease. Stable mode uses latest sta
 
 Numlon uses `egui`/`eframe` for GPU-rendered, DPI-aware desktop UI. Controls, circles, switches, cards, and the in-window logo are vector shapes tessellated by egui with feathered anti-aliasing. No GDI or GDI+ rounded-control rendering remains.
 
-The window keeps a compact Windows 11-inspired settings layout, yellow accent, native resizing, and vertical overflow scrolling for smaller viewports.
+Window opens at content-fit height without scrollbar on normal monitors. Minimum height matches content when monitor allows it. Smaller displays fall back to resizable vertical scrolling.
 
 Development build title includes current package version and `dev`, for example:
 
@@ -231,7 +227,9 @@ global-hotkey 0.8.0
 windows-sys 0.61.2
 ```
 
-Crate versions are pinned for starter-branch reproducibility. Rust 1.92 or newer is required. Generated `Cargo.lock` should be committed before merging.
+Direct GUI and Windows integration dependencies use current release tracks: `eframe 0.35.0`, `tray-icon 0.24.1`, `global-hotkey 0.8.0`, `image 0.25.10`, `reqwest 0.13.4`, `windows-sys 0.61.2`, and `winresource 0.1.31`. `winresource` disables optional TOML parsing because Numlon configures resources directly in `build.rs`. Rust 1.92 or newer is required. Generate and commit `Cargo.lock` before merging.
+
+When window is hidden, Numlon reduces repaint polling and asks Windows to trim inactive working-set pages. This lowers resident memory while preserving tray, shortcut, NumLock enforcement, and instant reopen behavior. Release build measurements matter more than development profile measurements.
 
 ## Data location
 
