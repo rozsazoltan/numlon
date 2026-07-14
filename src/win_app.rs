@@ -69,8 +69,8 @@ const ENFORCE_INTERVAL_MS: u32 = 300;
 const UPDATE_POLL_INTERVAL_MS: u32 = 250;
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
-const WINDOW_WIDTH: i32 = 636;
-const WINDOW_HEIGHT: i32 = 736;
+const WINDOW_WIDTH: i32 = 612;
+const WINDOW_HEIGHT: i32 = 608;
 
 const MENU_OPEN: usize = 2001;
 const MENU_TOGGLE_ENABLED: usize = 2002;
@@ -84,14 +84,14 @@ const MENU_INSTALL_UPDATE: usize = 2009;
 const MENU_OPEN_RELEASES: usize = 2010;
 const MENU_EXIT: usize = 2011;
 
-const ENABLED_SWITCH: UiRect = UiRect::new(532, 118, 590, 150);
-const MODE_FORCE_ROW: UiRect = UiRect::new(30, 224, 606, 274);
-const MODE_LED_ROW: UiRect = UiRect::new(30, 280, 606, 330);
-const HOTKEY_BUTTON: UiRect = UiRect::new(476, 384, 592, 422);
-const STARTUP_SWITCH: UiRect = UiRect::new(532, 470, 590, 502);
-const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(532, 560, 590, 592);
-const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(420, 556, 516, 598);
-const HIDE_BUTTON: UiRect = UiRect::new(494, 662, 600, 700);
+const ENABLED_SWITCH: UiRect = UiRect::new(520, 104, 578, 136);
+const MODE_FORCE_ROW: UiRect = UiRect::new(28, 206, 582, 250);
+const MODE_LED_ROW: UiRect = UiRect::new(28, 256, 582, 300);
+const HOTKEY_BUTTON: UiRect = UiRect::new(450, 336, 578, 374);
+const STARTUP_SWITCH: UiRect = UiRect::new(520, 418, 578, 450);
+const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(520, 502, 578, 534);
+const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(418, 506, 506, 544);
+const HIDE_BUTTON: UiRect = UiRect::new(470, 560, 586, 596);
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
@@ -873,11 +873,11 @@ impl App {
     }
 
     unsafe fn draw_enabled_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(18, 92, 618, 182), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 82, 594, 156), rgb(255, 255, 252));
         draw_text(
             hdc,
             "NUMLOCK CONTROL",
-            UiRect::new(34, 106, 420, 124),
+            UiRect::new(30, 96, 420, 114),
             11,
             700,
             rgb(128, 128, 125),
@@ -890,7 +890,7 @@ impl App {
             } else {
                 "Numlon is paused"
             },
-            UiRect::new(34, 128, 500, 154),
+            UiRect::new(30, 116, 468, 140),
             20,
             700,
             rgb(28, 28, 30),
@@ -903,7 +903,7 @@ impl App {
             } else {
                 "Keyboard state remains untouched"
             },
-            UiRect::new(34, 154, 500, 172),
+            UiRect::new(30, 138, 468, 152),
             12,
             400,
             rgb(104, 104, 102),
@@ -913,11 +913,11 @@ impl App {
     }
 
     unsafe fn draw_mode_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(18, 192, 618, 348), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 168, 594, 312), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Behavior",
-            UiRect::new(34, 206, 300, 228),
+            UiRect::new(30, 182, 300, 204),
             15,
             700,
             rgb(28, 28, 30),
@@ -943,11 +943,11 @@ impl App {
     }
 
     unsafe fn draw_hotkey_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(18, 360, 618, 438), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 324, 594, 396), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Toggle shortcut",
-            UiRect::new(34, 374, 260, 396),
+            UiRect::new(30, 338, 260, 358),
             15,
             700,
             rgb(28, 28, 30),
@@ -963,7 +963,7 @@ impl App {
         draw_text(
             hdc,
             hotkey_text,
-            UiRect::new(34, 402, 452, 424),
+            UiRect::new(30, 360, 404, 382),
             14,
             if self.capturing_hotkey { 700 } else { 500 },
             if self.capturing_hotkey {
@@ -986,11 +986,11 @@ impl App {
     }
 
     unsafe fn draw_startup_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(18, 450, 618, 528), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 408, 594, 480), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Start with Windows",
-            UiRect::new(34, 464, 420, 486),
+            UiRect::new(30, 422, 420, 442),
             15,
             700,
             rgb(28, 28, 30),
@@ -1005,7 +1005,7 @@ impl App {
             } else {
                 "Keep executable in final folder before enabling"
             },
-            UiRect::new(34, 490, 500, 512),
+            UiRect::new(30, 444, 470, 466),
             12,
             400,
             rgb(104, 104, 102),
@@ -1019,11 +1019,11 @@ impl App {
     }
 
     unsafe fn draw_updates_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(18, 540, 618, 618), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 492, 594, 564), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Updates",
-            UiRect::new(34, 554, 240, 576),
+            UiRect::new(30, 506, 240, 526),
             15,
             700,
             rgb(28, 28, 30),
@@ -1034,7 +1034,7 @@ impl App {
             draw_text(
                 hdc,
                 "Disabled in dev builds — no GitHub API requests.",
-                UiRect::new(34, 582, 580, 604),
+                UiRect::new(30, 528, 396, 548),
                 12,
                 400,
                 rgb(104, 104, 102),
@@ -1050,7 +1050,7 @@ impl App {
             } else {
                 "Stable channel"
             },
-            UiRect::new(34, 582, 390, 604),
+            UiRect::new(30, 528, 356, 548),
             12,
             400,
             rgb(104, 104, 102),
@@ -1073,7 +1073,7 @@ impl App {
         draw_text(
             hdc,
             &self.status,
-            UiRect::new(28, 654, 476, 700),
+            UiRect::new(24, 566, 430, 594),
             11,
             400,
             rgb(96, 96, 93),
@@ -1239,11 +1239,11 @@ unsafe fn style_window(hwnd: HWND) {
 unsafe fn draw_header(hdc: HDC) {
     DrawIconEx(
         hdc,
-        28,
-        18,
+        24,
+        16,
         load_app_icon(),
-        56,
-        56,
+        48,
+        48,
         0,
         ptr::null_mut(),
         DI_NORMAL,
@@ -1251,7 +1251,7 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Numlon",
-        UiRect::new(94, 22, 410, 48),
+        UiRect::new(84, 18, 360, 42),
         22,
         700,
         rgb(28, 28, 30),
@@ -1260,7 +1260,7 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Tiny keypad control, without LED drama.",
-        UiRect::new(94, 50, 470, 72),
+        UiRect::new(84, 44, 430, 64),
         12,
         400,
         rgb(104, 104, 102),
@@ -1268,7 +1268,7 @@ unsafe fn draw_header(hdc: HDC) {
     );
     draw_pill(
         hdc,
-        UiRect::new(496, 24, 604, 56),
+        UiRect::new(462, 20, 586, 52),
         &config::app_version_label(),
     );
 }
