@@ -23,7 +23,9 @@ use crate::{
     config::{self, NumlockMode, SavedState},
     hotkey::HotkeyBinding,
     keyboard_hook::KeyboardHook,
-    numlock, startup, updater,
+    numlock,
+    single_instance::BuildKind,
+    startup, updater,
     wide::str_wide_null,
 };
 
@@ -69,8 +71,11 @@ pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
 }
 
-pub fn activate_existing_instance() {
-    let title = str_wide_null(&config::window_title());
+pub fn activate_existing_instance(existing_build: BuildKind) {
+    let title = existing_build
+        .window_title()
+        .unwrap_or_else(config::window_title);
+    let title = str_wide_null(title);
 
     for _ in 0..20 {
         let hwnd = unsafe { FindWindowW(ptr::null(), title.as_ptr()) };
