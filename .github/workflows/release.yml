@@ -172,7 +172,7 @@ jobs:
                   $ManifestVersionMatch.Groups["minor"].Value, `
                   $ManifestVersionMatch.Groups["patch"].Value
               $Manifest = Get-Content $ManifestPath -Raw
-              $ManifestIdentityPattern = '(?s)(<assemblyIdentity[^>]*\bname="Numlon"[^>]*?\bversion=")[^"]+(")'
+              $ManifestIdentityPattern = '(?s)(<assemblyIdentity\b(?=[^>]*\bname="Numlon")[^>]*\bversion=")[^"]+(")'
               if (-not [regex]::IsMatch($Manifest, $ManifestIdentityPattern)) {
                   Write-Error "Could not find the Numlon assemblyIdentity version in $ManifestPath."
                   exit 1
