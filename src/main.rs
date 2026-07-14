@@ -5,8 +5,6 @@ mod hotkey;
 mod updater;
 
 #[cfg(windows)]
-mod gdi_plus;
-#[cfg(windows)]
 mod keyboard_hook;
 #[cfg(windows)]
 mod numlock;

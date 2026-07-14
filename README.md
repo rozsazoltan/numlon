@@ -17,6 +17,7 @@
   - [Enable startup](#enable-startup)
   - [Check for updates](#check-for-updates)
 - [Window behavior](#window-behavior)
+- [Architecture](#architecture)
 - [Data location](#data-location)
 - [Known limitations](#known-limitations)
 - [Contributing](#contributing)
@@ -95,19 +96,23 @@ Development builds perform no automatic or manual GitHub API update checks.
 Primary accent:
 
 ```text
-#FFB900
+#FFC928
 ```
 
-Executable and tray icon assets:
+Executable, window, taskbar, and tray icon assets:
 
 ```text
 assets/numlon.svg
 assets/numlon-paused.svg
+assets/numlon.png
+assets/numlon-paused.png
+assets/numlon-tray.png
+assets/numlon-paused-tray.png
 assets/numlon.ico
 assets/numlon-paused.ico
 ```
 
-`build.rs` embeds multi-size `assets/numlon.ico` into Windows executable. The ICO contains exact-size 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128, and 256 pixel frames. `assets/numlon.svg` remains vector source.
+SVG files are canonical vector sources. Eframe uses embedded PNG icon data for its native window. Windows shell and executable metadata use multi-size ICO resources. Tray uses dedicated 32 px PNGs instead of scaling a large desktop icon at runtime.
 
 ## Get started
 
@@ -186,7 +191,9 @@ Prerelease mode selects newest non-draft prerelease. Stable mode uses latest sta
 
 ## Window behavior
 
-Numlon uses native Windows APIs with a compact Fluent-style settings surface, rounded Windows 11 frame, yellow accent, resizable window, vertical overflow scrolling, and embedded multi-size icons.
+Numlon uses `egui`/`eframe` for GPU-rendered, DPI-aware desktop UI. Controls, circles, switches, cards, and the in-window logo are vector shapes tessellated by egui with feathered anti-aliasing. No GDI or GDI+ rounded-control rendering remains.
+
+The window keeps a compact Windows 11-inspired settings layout, yellow accent, native resizing, and vertical overflow scrolling for smaller viewports.
 
 Development build title includes current package version and `dev`, for example:
 
@@ -205,6 +212,26 @@ Development builds open main window automatically. Production manual launches op
 Closing window hides Numlon to tray. Use tray menu **Quit Numlon** to stop process.
 
 Only one Numlon instance can run. Starting another copy activates existing window and exits new process.
+
+## Architecture
+
+UI rendering:
+
+```text
+eframe 0.35.0
+egui 0.35.0
+OpenGL glow backend
+```
+
+Desktop integrations:
+
+```text
+tray-icon 0.24.1
+global-hotkey 0.8.0
+windows-sys 0.61.2
+```
+
+Crate versions are pinned for starter-branch reproducibility. Rust 1.92 or newer is required. Generated `Cargo.lock` should be committed before merging.
 
 ## Data location
 
@@ -244,7 +271,7 @@ Issues and pull requests are welcome. Keep changes small, focused, testable, and
 
 Copyright (C) 2020–present [Zoltán Rózsa](https://github.com/rozsazoltan)
 
-Numlon uses Rust and native Windows APIs to provide minimal tray-based NumLock control.
+Numlon uses Rust, `egui`/`eframe`, and focused Windows integrations to provide minimal tray-based NumLock control.
 
 ## Development runner
 

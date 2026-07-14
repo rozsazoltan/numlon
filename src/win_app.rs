@@ -1,57 +1,22 @@
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Sense, Stroke};
+use global_hotkey::{
+    hotkey::HotKey,
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
+};
 use std::{
-    env, mem,
+    env,
     ptr,
     sync::mpsc::{self, Receiver},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
-use windows_sys::Win32::{
-    Foundation::{GetLastError, COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-    Graphics::{
-        Dwm::{
-            DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
-            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-        },
-        Gdi::{
-            BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
-            CreatePen, CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint,
-            FillRect, InvalidateRect, RestoreDC, RoundRect, SaveDC, SelectObject, SetBkMode,
-            SetTextColor, SetViewportOrgEx, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID,
-            SRCCOPY, TRANSPARENT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-            DT_VCENTER,
-        },
-    },
-    System::LibraryLoader::GetModuleHandleW,
-    UI::{
-        Input::KeyboardAndMouse::{
-            RegisterHotKey, UnregisterHotKey, VK_ESCAPE,
-        },
-        Shell::{
-            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-            NOTIFYICONDATAW,
-        },
-        WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-            DestroyWindow, DispatchMessageW, DrawIconEx, FindWindowW, GetClientRect, GetCursorPos,
-            GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
-            IsIconic, LoadCursorW, LoadIconW, LoadImageW, MessageBoxW, PostMessageW,
-            PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow, SetMenuDefaultItem,
-            SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TrackPopupMenu,
-            TranslateMessage, CW_USEDEFAULT, DI_NORMAL, GWLP_USERDATA, HMENU, ICON_BIG,
-            ICON_SMALL, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, LR_SHARED, MF_CHECKED,
-            MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MINMAXINFO, MSG,
-            SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION,
-            SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE,
-            SIF_TRACKPOS, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SW_HIDE, SW_RESTORE,
-            SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE,
-            WM_COMMAND, WM_DESTROY, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
-            WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
-            WM_RBUTTONUP, WM_SETICON, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER, WM_VSCROLL, WNDCLASSW,
-            WS_CAPTION, WS_EX_APPWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED,
-            WS_SYSMENU, WS_THICKFRAME, WS_VSCROLL,
-        },
-    },
+use tray_icon::{
+    menu::{IconMenuItem, Menu, MenuEvent},
+    Icon as TrayImage, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
 };
 
 use crate::{
@@ -59,72 +24,48 @@ use crate::{
     hotkey::HotkeyBinding,
     keyboard_hook::KeyboardHook,
     numlock, startup, updater,
-    wide::{copy_wide_truncated, str_wide_null},
+    wide::str_wide_null,
 };
 
-#[link(name = "user32")]
-extern "system" {
-    fn SetScrollInfo(
-        hwnd: HWND,
-        bar: i32,
-        info: *const SCROLLINFO,
-        redraw: i32,
-    ) -> i32;
-}
-
-pub const CLASS_NAME: &str = "NumlonWindowClass";
-
-const WM_TRAY_ICON: u32 = WM_APP + 1;
-const WM_SHOW_EXISTING: u32 = WM_APP + 2;
-const TRAY_ID: u32 = 1;
-const HOTKEY_TOGGLE_ALWAYS: i32 = 1;
-const APP_ICON_RESOURCE_ID: u16 = 1;
-const PAUSED_ICON_RESOURCE_ID: u16 = 2;
-const TIMER_ENFORCE: usize = 1;
-const TIMER_POLL_UPDATES: usize = 2;
-const ENFORCE_INTERVAL_MS: u32 = 300;
-const UPDATE_POLL_INTERVAL_MS: u32 = 250;
+const ENFORCE_INTERVAL: Duration = Duration::from_millis(300);
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(80);
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
-const CONTENT_WIDTH: i32 = 600;
-const CONTENT_HEIGHT: i32 = 500;
-const MIN_WINDOW_WIDTH: i32 = 620;
-const MIN_WINDOW_HEIGHT: i32 = 400;
-const SCROLL_STEP: i32 = 48;
+const BACKGROUND: Color32 = Color32::from_rgb(246, 246, 244);
+const SURFACE: Color32 = Color32::from_rgb(255, 255, 255);
+const SURFACE_MUTED: Color32 = Color32::from_rgb(249, 249, 247);
+const BORDER: Color32 = Color32::from_rgb(226, 226, 223);
+const TEXT: Color32 = Color32::from_rgb(28, 28, 30);
+const MUTED: Color32 = Color32::from_rgb(103, 103, 100);
+const YELLOW: Color32 = Color32::from_rgb(255, 201, 40);
+const YELLOW_SOFT: Color32 = Color32::from_rgb(255, 248, 218);
+const GRAPHITE: Color32 = Color32::from_rgb(37, 41, 50);
 
-const MENU_OPEN: usize = 2001;
-const MENU_TOGGLE_ENABLED: usize = 2002;
-const MENU_MODE_FORCE_ON: usize = 2003;
-const MENU_MODE_LED_OFF: usize = 2004;
-const MENU_CHANGE_SHORTCUT: usize = 2005;
-const MENU_TOGGLE_STARTUP: usize = 2006;
-const MENU_TOGGLE_PRERELEASES: usize = 2007;
-const MENU_CHECK_UPDATES: usize = 2008;
-const MENU_INSTALL_UPDATE: usize = 2009;
-const MENU_OPEN_RELEASES: usize = 2010;
-const MENU_EXIT: usize = 2011;
-
-const ENABLED_SWITCH: UiRect = UiRect::new(510, 92, 566, 122);
-const MODE_FORCE_ROW: UiRect = UiRect::new(28, 160, 286, 204);
-const MODE_LED_ROW: UiRect = UiRect::new(294, 160, 572, 204);
-const HOTKEY_BUTTON: UiRect = UiRect::new(452, 226, 572, 262);
-const STARTUP_SWITCH: UiRect = UiRect::new(510, 286, 566, 316);
-const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(510, 346, 566, 376);
-const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(410, 342, 496, 380);
-const HIDE_BUTTON: UiRect = UiRect::new(476, 444, 584, 480);
+const MENU_OPEN: &str = "open";
+const MENU_TOGGLE: &str = "toggle";
+const MENU_FORCE: &str = "force";
+const MENU_LED_OFF: &str = "led-off";
+const MENU_SHORTCUT: &str = "shortcut";
+const MENU_STARTUP: &str = "startup";
+const MENU_PRERELEASE: &str = "prerelease";
+const MENU_CHECK: &str = "check";
+const MENU_INSTALL: &str = "install";
+const MENU_RELEASES: &str = "releases";
+const MENU_QUIT: &str = "quit";
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
 }
 
 pub fn activate_existing_instance() {
-    let class_name = str_wide_null(CLASS_NAME);
+    let title = str_wide_null(&config::window_title());
 
     for _ in 0..20 {
-        let hwnd = unsafe { FindWindowW(class_name.as_ptr(), ptr::null()) };
+        let hwnd = unsafe { FindWindowW(ptr::null(), title.as_ptr()) };
         if !hwnd.is_null() {
             unsafe {
-                PostMessageW(hwnd, WM_SHOW_EXISTING, 0, 0);
+                ShowWindow(hwnd, if IsIconic(hwnd) != 0 { SW_RESTORE } else { SW_SHOW });
+                SetForegroundWindow(hwnd);
             }
             return;
         }
@@ -133,350 +74,319 @@ pub fn activate_existing_instance() {
 }
 
 pub fn run() -> Result<()> {
-    let _gdi_plus = crate::gdi_plus::Session::start();
+    let icon = load_window_icon(include_bytes!("../assets/numlon.png"))?;
+    let visible = config::is_dev_build() || !started_from_startup();
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(config::window_title())
+        .with_inner_size([620.0, 520.0])
+        .with_min_inner_size([520.0, 420.0])
+        .with_resizable(true)
+        .with_visible(visible)
+        .with_icon(icon);
 
-    unsafe {
-        let instance = GetModuleHandleW(ptr::null());
-        let class_name = str_wide_null(CLASS_NAME);
-        let title = str_wide_null(&config::window_title());
-        let initial_state = config::load_state();
+    let options = eframe::NativeOptions {
+        viewport,
+        renderer: eframe::Renderer::Glow,
+        multisampling: 0,
+        centered: true,
+        ..Default::default()
+    };
 
-        let class = WNDCLASSW {
-            style: 0,
-            lpfnWndProc: Some(window_proc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: instance,
-            hIcon: load_app_icon(),
-            hCursor: LoadCursorW(ptr::null_mut(), IDC_ARROW),
-            hbrBackground: ptr::null_mut(),
-            lpszMenuName: ptr::null(),
-            lpszClassName: class_name.as_ptr(),
-        };
+    eframe::run_native(
+        config::app_name(),
+        options,
+        Box::new(|creation_context| Ok(Box::new(NumlonApp::new(creation_context)))),
+    )
+    .map_err(|error| anyhow::anyhow!("failed to run Numlon UI: {error}"))
+}
 
-        RegisterClassW(&class);
+struct TrayState {
+    icon: TrayIcon,
+    toggle: IconMenuItem,
+    force: IconMenuItem,
+    led_off: IconMenuItem,
+    shortcut: IconMenuItem,
+    startup: IconMenuItem,
+    prerelease: Option<IconMenuItem>,
+    install: Option<IconMenuItem>,
+}
 
-        let x = if initial_state.window_x == i32::MIN {
-            CW_USEDEFAULT
-        } else {
-            initial_state.window_x
-        };
-        let y = if initial_state.window_y == i32::MIN {
-            CW_USEDEFAULT
-        } else {
-            initial_state.window_y
-        };
-
-        let hwnd = CreateWindowExW(
-            WS_EX_APPWINDOW,
-            class_name.as_ptr(),
-            title.as_ptr(),
-            WS_OVERLAPPED
-                | WS_CAPTION
-                | WS_SYSMENU
-                | WS_THICKFRAME
-                | WS_MINIMIZEBOX
-                | WS_MAXIMIZEBOX
-                | WS_VSCROLL,
-            x,
-            y,
-            CONTENT_WIDTH,
-            CONTENT_HEIGHT,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            instance,
-            ptr::null_mut(),
+impl TrayState {
+    fn new(state: &SavedState, keyboard_hook_available: bool) -> Result<Self> {
+        let menu = Menu::new();
+        let open = IconMenuItem::with_id(MENU_OPEN, "Open Numlon", true, None, None);
+        let toggle = IconMenuItem::with_id(MENU_TOGGLE, "", true, None, None);
+        let force = IconMenuItem::with_id(MENU_FORCE, "", true, None, None);
+        let led_off = IconMenuItem::with_id(MENU_LED_OFF, "", keyboard_hook_available, None, None);
+        let shortcut = IconMenuItem::with_id(MENU_SHORTCUT, "", true, None, None);
+        let startup = IconMenuItem::with_id(
+            MENU_STARTUP,
+            "",
+            !config::is_dev_build(),
+            None,
+            None,
         );
+        let quit = IconMenuItem::with_id(MENU_QUIT, "Quit Numlon", true, None, None);
 
-        if hwnd.is_null() {
-            anyhow::bail!("failed to create Numlon window: {}", GetLastError());
-        }
+        menu.append_items(&[
+            &open,
+            &toggle,
+            &force,
+            &led_off,
+            &shortcut,
+            &startup,
+        ])?;
 
-        resize_to_client(hwnd, CONTENT_WIDTH, CONTENT_HEIGHT);
-        style_window(hwnd);
-        set_window_icons(hwnd);
+        let (prerelease, install) = if config::is_dev_build() {
+            (None, None)
+        } else {
+            let prerelease = IconMenuItem::with_id(MENU_PRERELEASE, "", true, None, None);
+            let check = IconMenuItem::with_id(MENU_CHECK, "Check for updates", true, None, None);
+            let install = IconMenuItem::with_id(
+                MENU_INSTALL,
+                "Install available update",
+                false,
+                None,
+                None,
+            );
+            let releases =
+                IconMenuItem::with_id(MENU_RELEASES, "Open releases", true, None, None);
+            menu.append_items(&[&prerelease, &check, &install, &releases])?;
+            (Some(prerelease), Some(install))
+        };
+        menu.append(&quit)?;
 
-        let mut app = Box::new(App::new(hwnd, initial_state));
-        app.sync_startup_state();
-        app.install_keyboard_hook();
+        let icon = TrayIconBuilder::new()
+            .with_id("numlon")
+            .with_menu(Box::new(menu))
+            .with_menu_on_left_click(false)
+            .with_menu_on_right_click(true)
+            .with_icon(load_tray_image(if state.always_enabled {
+                include_bytes!("../assets/numlon-tray.png")
+            } else {
+                include_bytes!("../assets/numlon-paused-tray.png")
+            })?)
+            .with_tooltip(tray_tooltip(state))
+            .build()?;
 
-        let app_ptr = Box::into_raw(app);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_ptr as isize);
-
-        if let Some(app) = app_from_hwnd(hwnd) {
-            app.add_tray_icon();
-            app.register_saved_hotkey();
-            app.apply_runtime_mode();
-            app.prompt_startup_on_first_run();
-            app.maybe_start_auto_update_check();
-            app.update_scrollbar();
-            app.repaint();
-
-            if config::is_dev_build() || !started_from_startup() {
-                app.show_window();
-            }
-        }
-
-        SetTimer(hwnd, TIMER_ENFORCE, ENFORCE_INTERVAL_MS, None);
-        if !config::is_dev_build() {
-            SetTimer(hwnd, TIMER_POLL_UPDATES, UPDATE_POLL_INTERVAL_MS, None);
-        }
-
-        let mut message = MSG::default();
-        while GetMessageW(&mut message, ptr::null_mut(), 0, 0) > 0 {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-
+        let tray = Self {
+            icon,
+            toggle,
+            force,
+            led_off,
+            shortcut,
+            startup,
+            prerelease,
+            install,
+        };
+        tray.sync(state, keyboard_hook_available, false);
+        Ok(tray)
     }
 
-    Ok(())
+    fn sync(&self, state: &SavedState, keyboard_hook_available: bool, update_installable: bool) {
+        self.toggle.set_text(if state.always_enabled {
+            "✓ Numlon enabled"
+        } else {
+            "Numlon paused"
+        });
+        self.force.set_text(if state.numlock_mode == NumlockMode::ForceOn {
+            "✓ Keep NumLock on"
+        } else {
+            "Keep NumLock on"
+        });
+        self.led_off.set_text(if state.numlock_mode == NumlockMode::LedOffDigits {
+            "✓ Keep LED off, type digits"
+        } else {
+            "Keep LED off, type digits"
+        });
+        self.led_off.set_enabled(keyboard_hook_available);
+        self.shortcut
+            .set_text(format!("Change shortcut…  {}", state.hotkey.display()));
+        self.startup.set_text(if state.startup_enabled {
+            "✓ Start with Windows"
+        } else {
+            "Start with Windows"
+        });
+        if let Some(prerelease) = &self.prerelease {
+            prerelease.set_text(if state.include_prereleases {
+                "✓ Include prereleases"
+            } else {
+                "Include prereleases"
+            });
+        }
+        if let Some(install) = &self.install {
+            install.set_enabled(update_installable);
+        }
+
+        let icon = load_tray_image(if state.always_enabled {
+            include_bytes!("../assets/numlon-tray.png")
+        } else {
+            include_bytes!("../assets/numlon-paused-tray.png")
+        });
+        if let Ok(icon) = icon {
+            let _ = self.icon.set_icon(Some(icon));
+        }
+        let _ = self.icon.set_tooltip(Some(tray_tooltip(state)));
+    }
 }
 
-struct App {
-    hwnd: HWND,
+struct NumlonApp {
     state: SavedState,
+    status: String,
     keyboard_hook: Option<KeyboardHook>,
-    hotkey_registered: bool,
+    hotkey_manager: Option<GlobalHotKeyManager>,
+    registered_hotkey: Option<HotKey>,
+    tray: Option<TrayState>,
     capturing_hotkey: bool,
+    startup_prompt_open: bool,
+    quit_requested: bool,
+    last_enforce: Instant,
     last_update_check: Option<updater::UpdateCheck>,
     update_rx: Option<Receiver<anyhow::Result<updater::UpdateCheck>>>,
-    status: String,
-    scroll_offset: i32,
 }
 
-impl App {
-    fn new(hwnd: HWND, state: SavedState) -> Self {
-        let status = if state.last_status.is_empty() {
+impl NumlonApp {
+    fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
+        configure_egui(&creation_context.egui_ctx);
+
+        let mut state = config::load_state();
+        let mut status = if state.last_status.is_empty() {
             "Ready.".to_owned()
         } else {
             state.last_status.clone()
         };
 
-        Self {
-            hwnd,
+        match startup::is_enabled() {
+            Ok(enabled) => state.startup_enabled = enabled,
+            Err(error) => status = format!("Startup check failed: {error}"),
+        }
+
+        let keyboard_hook = match KeyboardHook::install() {
+            Ok(hook) => Some(hook),
+            Err(error) => {
+                status = format!("LED-off mode unavailable: {error}");
+                None
+            }
+        };
+
+        let hotkey_manager = match GlobalHotKeyManager::new() {
+            Ok(manager) => Some(manager),
+            Err(error) => {
+                status = format!("Global shortcut manager failed: {error}");
+                None
+            }
+        };
+
+        let tray = match TrayState::new(&state, keyboard_hook.is_some()) {
+            Ok(tray) => Some(tray),
+            Err(error) => {
+                status = format!("Tray initialization failed: {error}");
+                None
+            }
+        };
+
+        let startup_prompt_open = !config::is_dev_build() && !state.startup_prompted;
+        let mut app = Self {
             state,
-            keyboard_hook: None,
-            hotkey_registered: false,
+            status,
+            keyboard_hook,
+            hotkey_manager,
+            registered_hotkey: None,
+            tray,
             capturing_hotkey: false,
+            startup_prompt_open,
+            quit_requested: false,
+            last_enforce: Instant::now() - ENFORCE_INTERVAL,
             last_update_check: None,
             update_rx: None,
-            status,
-            scroll_offset: 0,
+        };
+        app.register_saved_hotkey();
+        app.apply_runtime_mode();
+        app.maybe_start_auto_update_check();
+        app.sync_tray();
+        creation_context
+            .egui_ctx
+            .request_repaint_after(EVENT_POLL_INTERVAL);
+        app
+    }
+
+    fn register_saved_hotkey(&mut self) {
+        let Some(manager) = &self.hotkey_manager else {
+            return;
+        };
+        match self.state.hotkey.to_global_hotkey() {
+            Ok(hotkey) => match manager.register(hotkey) {
+                Ok(()) => self.registered_hotkey = Some(hotkey),
+                Err(error) => {
+                    self.status = format!(
+                        "Shortcut {} is unavailable: {error}",
+                        self.state.hotkey.display()
+                    );
+                }
+            },
+            Err(error) => self.status = error,
         }
     }
 
-    fn install_keyboard_hook(&mut self) {
-        match KeyboardHook::install() {
-            Ok(hook) => self.keyboard_hook = Some(hook),
-            Err(error) => {
-                self.status =
-                    format!("LED-off digit mode unavailable: keyboard hook failed: {error}");
-            }
-        }
-    }
-
-    fn sync_startup_state(&mut self) {
-        match startup::is_enabled() {
-            Ok(enabled) => self.state.startup_enabled = enabled,
-            Err(error) => self.status = format!("Startup check failed: {error}"),
+    fn unregister_hotkey(&mut self) {
+        if let (Some(manager), Some(hotkey)) = (&self.hotkey_manager, self.registered_hotkey.take())
+        {
+            let _ = manager.unregister(hotkey);
         }
     }
 
     fn save(&mut self) {
-        self.remember_window_position();
         self.state.last_status = self.status.clone();
         if let Err(error) = config::save_state(&self.state) {
-            self.status = format!("State save failed: {error}");
+            self.status = format!("Config save failed: {error}");
         }
     }
 
-    fn remember_window_position(&mut self) {
-        let mut rect = RECT::default();
-        if unsafe { GetWindowRect(self.hwnd, &mut rect) } != 0 {
-            self.state.window_x = rect.left;
-            self.state.window_y = rect.top;
+    fn sync_tray(&self) {
+        if let Some(tray) = &self.tray {
+            tray.sync(
+                &self.state,
+                self.keyboard_hook.is_some(),
+                self.update_is_installable(),
+            );
         }
     }
 
-    unsafe fn add_tray_icon(&self) {
-        let mut data = self.tray_data();
-        Shell_NotifyIconW(NIM_ADD, &mut data);
+    fn show_window(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
-    unsafe fn update_tray_icon(&self) {
-        let mut data = self.tray_data();
-        Shell_NotifyIconW(NIM_MODIFY, &mut data);
+    fn hide_window(&mut self, ctx: &egui::Context) {
+        self.save();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
-    unsafe fn remove_tray_icon(&self) {
-        let mut data = self.tray_data();
-        Shell_NotifyIconW(NIM_DELETE, &mut data);
-    }
-
-    unsafe fn tray_data(&self) -> NOTIFYICONDATAW {
-        let mut data: NOTIFYICONDATAW = mem::zeroed();
-        data.cbSize = mem::size_of::<NOTIFYICONDATAW>() as u32;
-        data.hWnd = self.hwnd;
-        data.uID = TRAY_ID;
-        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-        data.uCallbackMessage = WM_TRAY_ICON;
-        data.hIcon = load_tray_icon(self.state.always_enabled);
-
-        let state = if self.state.always_enabled {
-            self.state.numlock_mode.label()
-        } else {
-            "Paused"
-        };
-        let tooltip = format!(
-            "{} {} — {} — {}",
-            config::app_name(),
-            config::app_version_label(),
-            state,
-            self.state.hotkey.display()
-        );
-        copy_wide_truncated(&mut data.szTip, &tooltip);
-        data
-    }
-
-    unsafe fn register_saved_hotkey(&mut self) {
-        match self.register_hotkey_binding(&self.state.hotkey.clone()) {
-            Ok(()) => self.hotkey_registered = true,
-            Err(error) => {
-                self.hotkey_registered = false;
-                self.status = error;
-            }
-        }
-    }
-
-    unsafe fn register_hotkey_binding(&self, binding: &HotkeyBinding) -> Result<(), String> {
-        let Some(virtual_key) = binding.virtual_key() else {
-            return Err(format!("Unsupported shortcut key: {}", binding.key));
-        };
-
-        let ok = RegisterHotKey(
-            self.hwnd,
-            HOTKEY_TOGGLE_ALWAYS,
-            binding.modifiers(),
-            virtual_key,
-        );
-        if ok == 0 {
-            return Err(format!(
-                "Shortcut {} is unavailable. Windows error: {}",
-                binding.display(),
-                GetLastError()
-            ));
-        }
-
-        Ok(())
-    }
-
-    unsafe fn unregister_hotkey(&mut self) {
-        if self.hotkey_registered {
-            UnregisterHotKey(self.hwnd, HOTKEY_TOGGLE_ALWAYS);
-            self.hotkey_registered = false;
-        }
-    }
-
-    unsafe fn begin_hotkey_capture(&mut self) {
-        if self.capturing_hotkey {
-            return;
-        }
-
-        self.unregister_hotkey();
-        self.capturing_hotkey = true;
-        self.status = "Press new shortcut. Esc cancels.".to_owned();
-        self.repaint();
-    }
-
-    unsafe fn capture_hotkey(&mut self, virtual_key: u32) {
-        if !self.capturing_hotkey {
-            return;
-        }
-
-        if virtual_key == VK_ESCAPE as u32 {
-            self.capturing_hotkey = false;
-            self.register_saved_hotkey();
-            self.status = "Shortcut change cancelled.".to_owned();
-            self.repaint();
-            return;
-        }
-
-        let Some(candidate) = HotkeyBinding::from_key_event(virtual_key) else {
-            return;
-        };
-
-        match self.register_hotkey_binding(&candidate) {
-            Ok(()) => {
-                self.hotkey_registered = true;
-                self.capturing_hotkey = false;
-                self.state.hotkey = candidate;
-                self.status = format!("Shortcut saved: {}.", self.state.hotkey.display());
-                self.save();
-                self.repaint();
-                self.update_tray_icon();
-            }
-            Err(error) => {
-                self.capturing_hotkey = false;
-                self.register_saved_hotkey();
-                self.status = error;
-                self.repaint();
-            }
-        }
-    }
-
-    unsafe fn prompt_startup_on_first_run(&mut self) {
-        if config::is_dev_build() || self.state.startup_prompted {
-            return;
-        }
-
-        let result = message_box(
-            self.hwnd,
-            "Enable Numlon at Windows startup?\n\nMove numlon.exe to its final folder first. Do not move it afterward because Windows stores its exact path.",
-            "Numlon startup",
-            windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO
-                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
-        );
-        self.state.startup_prompted = true;
-
-        if result == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
-            self.set_startup_enabled(true);
-        } else {
-            self.save();
-        }
-    }
-
-    unsafe fn toggle_enabled(&mut self) {
+    fn toggle_enabled(&mut self) {
         self.state.always_enabled = !self.state.always_enabled;
         self.apply_runtime_mode();
-
         self.status = if self.state.always_enabled {
             format!("Enabled: {}.", self.state.numlock_mode.label())
         } else {
             "Numlon paused. NumLock left untouched.".to_owned()
         };
-
         self.save();
-        self.repaint();
-        self.update_tray_icon();
+        self.sync_tray();
     }
 
-    unsafe fn set_numlock_mode(&mut self, mode: NumlockMode) {
+    fn set_mode(&mut self, mode: NumlockMode) {
         if mode == NumlockMode::LedOffDigits && self.keyboard_hook.is_none() {
-            self.status = "LED-off digit mode unavailable: keyboard hook could not start.".to_owned();
-            self.repaint();
+            self.status = "LED-off digit mode unavailable: keyboard hook failed.".to_owned();
             return;
         }
-
         self.state.numlock_mode = mode;
         self.apply_runtime_mode();
         self.status = format!("Mode changed: {}.", mode.label());
         self.save();
-        self.repaint();
-        self.update_tray_icon();
+        self.sync_tray();
     }
 
-    unsafe fn apply_runtime_mode(&mut self) {
+    fn apply_runtime_mode(&mut self) {
         if !self.state.always_enabled {
             KeyboardHook::set_remap_active(false);
             return;
@@ -492,11 +402,9 @@ impl App {
             NumlockMode::LedOffDigits => {
                 if self.keyboard_hook.is_none() {
                     KeyboardHook::set_remap_active(false);
-                    self.status =
-                        "LED-off digit mode unavailable: keyboard hook could not start.".to_owned();
+                    self.status = "LED-off digit mode unavailable: keyboard hook failed.".to_owned();
                     return;
                 }
-
                 if let Err(error) = numlock::ensure_numlock_off() {
                     self.status = format!("NumLock disable failed: {error}");
                     return;
@@ -506,80 +414,116 @@ impl App {
         }
     }
 
-    unsafe fn enforce_numlock(&mut self) {
-        if !self.state.always_enabled {
+    fn enforce_numlock(&mut self) {
+        if !self.state.always_enabled || self.last_enforce.elapsed() < ENFORCE_INTERVAL {
             return;
         }
-
+        self.last_enforce = Instant::now();
         let result = match self.state.numlock_mode {
             NumlockMode::ForceOn => numlock::ensure_numlock_on(),
             NumlockMode::LedOffDigits => numlock::ensure_numlock_off(),
         };
-
-        match result {
-            Ok(true) => {
-                self.status = match self.state.numlock_mode {
-                    NumlockMode::ForceOn => "NumLock restored.".to_owned(),
-                    NumlockMode::LedOffDigits => "NumLock turned off; keypad digit remap active.".to_owned(),
-                };
-                self.repaint();
-            }
-            Ok(false) => {}
-            Err(error) => {
-                self.status = format!("NumLock state update failed: {error}");
-                self.repaint();
-            }
+        if let Err(error) = result {
+            self.status = format!("NumLock state update failed: {error}");
         }
     }
 
-    unsafe fn toggle_startup(&mut self) {
-        if config::is_dev_build() {
-            self.status = "Startup changes disabled in dev builds.".to_owned();
-            self.repaint();
+    fn begin_hotkey_capture(&mut self, ctx: &egui::Context) {
+        self.unregister_hotkey();
+        self.capturing_hotkey = true;
+        self.status = "Press shortcut now. Escape cancels.".to_owned();
+        self.show_window(ctx);
+    }
+
+    fn poll_hotkey_capture(&mut self, ctx: &egui::Context) {
+        if !self.capturing_hotkey {
             return;
         }
+        let events = ctx.input(|input| input.events.clone());
+        for event in events {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                repeat: false,
+                modifiers,
+                ..
+            } = event
+            else {
+                continue;
+            };
 
-        let target = !self.state.startup_enabled;
-        if target {
-            let result = message_box(
-                self.hwnd,
-                "Move numlon.exe to its final folder first. Do not move it afterward because Windows stores its exact path.\n\nEnable startup now?",
-                "Numlon startup",
-                windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO
-                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
-            );
-            if result != windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
+            if key == egui::Key::Escape {
+                self.capturing_hotkey = false;
+                self.register_saved_hotkey();
+                self.status = "Shortcut change cancelled.".to_owned();
                 return;
             }
-        }
 
-        self.set_startup_enabled(target);
-        self.repaint();
-        self.update_tray_icon();
+            let Some(key_name) = egui_key_name(key) else {
+                continue;
+            };
+            let candidate = HotkeyBinding {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+                win: key_is_down(windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LWIN)
+                    || key_is_down(windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RWIN),
+                key: key_name,
+            };
+            let Some(manager) = &self.hotkey_manager else {
+                self.capturing_hotkey = false;
+                self.status = "Global shortcut manager unavailable.".to_owned();
+                return;
+            };
+            match candidate.to_global_hotkey() {
+                Ok(hotkey) => match manager.register(hotkey) {
+                    Ok(()) => {
+                        self.registered_hotkey = Some(hotkey);
+                        self.state.hotkey = candidate;
+                        self.capturing_hotkey = false;
+                        self.status = format!("Shortcut saved: {}.", self.state.hotkey.display());
+                        self.save();
+                        self.sync_tray();
+                        return;
+                    }
+                    Err(error) => {
+                        self.capturing_hotkey = false;
+                        self.register_saved_hotkey();
+                        self.status = format!("Shortcut unavailable: {error}");
+                        return;
+                    }
+                },
+                Err(error) => self.status = error,
+            }
+        }
     }
 
-    fn set_startup_enabled(&mut self, enabled: bool) {
-        match startup::set_enabled(enabled) {
+    fn toggle_startup(&mut self) {
+        if config::is_dev_build() {
+            self.status = "Startup changes disabled in dev builds.".to_owned();
+            return;
+        }
+        let target = !self.state.startup_enabled;
+        match startup::set_enabled(target) {
             Ok(()) => {
-                self.state.startup_enabled = enabled;
-                self.status = if enabled {
-                    "Startup enabled.".to_owned()
+                self.state.startup_enabled = target;
+                self.status = if target {
+                    "Windows startup enabled.".to_owned()
                 } else {
-                    "Startup disabled.".to_owned()
+                    "Windows startup disabled.".to_owned()
                 };
+                self.save();
+                self.sync_tray();
             }
             Err(error) => self.status = format!("Startup update failed: {error}"),
         }
-        self.save();
     }
 
-    unsafe fn toggle_prerelease_updates(&mut self) {
+    fn toggle_prerelease_updates(&mut self) {
         if config::is_dev_build() {
             self.status = "Update checks disabled in dev builds.".to_owned();
-            self.repaint();
             return;
         }
-
         self.state.include_prereleases = !self.state.include_prereleases;
         self.last_update_check = None;
         self.status = if self.state.include_prereleases {
@@ -588,1319 +532,704 @@ impl App {
             "Stable update channel selected.".to_owned()
         };
         self.save();
-        self.repaint();
+        self.sync_tray();
     }
 
-    unsafe fn maybe_start_auto_update_check(&mut self) {
+    fn maybe_start_auto_update_check(&mut self) {
         if config::is_dev_build() || self.update_rx.is_some() {
             return;
         }
-
         let now = config::seconds_since_unix_epoch();
         if now.saturating_sub(self.state.last_auto_update_check_unix_seconds)
             < AUTO_UPDATE_INTERVAL_SECONDS
         {
             return;
         }
-
         self.state.last_auto_update_check_unix_seconds = now;
         self.save();
         self.start_update_check();
     }
 
-    unsafe fn start_update_check(&mut self) {
+    fn start_update_check(&mut self) {
         if config::is_dev_build() {
             self.status = "Update checks disabled in dev builds.".to_owned();
-            self.repaint();
             return;
         }
-
         if self.update_rx.is_some() {
             return;
         }
-
         let include_prereleases = self.state.include_prereleases;
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = updater::check_for_update(include_prereleases);
-            let _ = tx.send(result);
+            let _ = tx.send(updater::check_for_update(include_prereleases));
         });
-
         self.update_rx = Some(rx);
-        self.status = if include_prereleases {
-            "Checking prerelease updates...".to_owned()
-        } else {
-            "Checking stable updates...".to_owned()
-        };
-        self.repaint();
+        self.status = "Checking for updates…".to_owned();
     }
 
-    unsafe fn poll_update_check(&mut self) {
-        let Some(rx) = self.update_rx.as_ref() else {
+    fn poll_update_check(&mut self) {
+        let Some(receiver) = self.update_rx.as_ref() else {
             return;
         };
-
-        match rx.try_recv() {
+        match receiver.try_recv() {
             Ok(Ok(check)) => {
                 self.status = update_status(&check);
                 self.last_update_check = Some(check);
                 self.update_rx = None;
                 self.save();
-                self.repaint();
+                self.sync_tray();
             }
             Ok(Err(error)) => {
                 self.status = format!("Update check failed: {error}");
                 self.update_rx = None;
                 self.save();
-                self.repaint();
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
-                self.status = "Update check failed: worker disconnected.".to_owned();
+                self.status = "Update worker disconnected.".to_owned();
                 self.update_rx = None;
-                self.save();
-                self.repaint();
             }
         }
     }
 
-    unsafe fn install_update(&mut self) {
+    fn install_update(&mut self) {
         if config::is_dev_build() {
             self.status = "Updates disabled in dev builds.".to_owned();
-            self.repaint();
             return;
         }
-
         let Some(check) = self.last_update_check.clone() else {
             self.status = "Check for updates first.".to_owned();
-            self.repaint();
             return;
         };
-
-        if !check.is_update_available || check.asset_download_url.is_none() {
+        if !self.update_is_installable() {
             self.status = "No installable update available.".to_owned();
-            self.repaint();
             return;
         }
-
-        self.status = "Installing update...".to_owned();
-        self.save();
-        self.repaint();
-
+        self.status = "Installing update…".to_owned();
         if let Err(error) = updater::install_update(&check) {
             self.status = format!("Update install failed: {error}");
-            self.save();
-            self.repaint();
         }
     }
 
     fn update_is_installable(&self) -> bool {
         self.last_update_check
             .as_ref()
-            .map(|check| check.is_update_available && check.asset_download_url.is_some())
-            .unwrap_or(false)
+            .is_some_and(|check| check.is_update_available && check.asset_download_url.is_some())
     }
 
-    unsafe fn show_window(&self) {
-        ShowWindow(
-            self.hwnd,
-            if IsIconic(self.hwnd) != 0 {
-                SW_RESTORE
-            } else {
-                SW_SHOW
-            },
-        );
-        SetForegroundWindow(self.hwnd);
-        self.repaint();
+    fn poll_global_hotkey(&mut self) {
+        while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
+            if event.state != HotKeyState::Pressed {
+                continue;
+            }
+            if self
+                .registered_hotkey
+                .as_ref()
+                .is_some_and(|hotkey| hotkey.id() == event.id)
+            {
+                self.toggle_enabled();
+            }
+        }
     }
 
-    unsafe fn hide_window(&mut self) {
+    fn poll_tray(&mut self, ctx: &egui::Context) {
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => self.show_window(ctx),
+                _ => {}
+            }
+        }
+
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            match event.id.as_ref() {
+                MENU_OPEN => self.show_window(ctx),
+                MENU_TOGGLE => self.toggle_enabled(),
+                MENU_FORCE => self.set_mode(NumlockMode::ForceOn),
+                MENU_LED_OFF => self.set_mode(NumlockMode::LedOffDigits),
+                MENU_SHORTCUT => self.begin_hotkey_capture(ctx),
+                MENU_STARTUP => self.toggle_startup(),
+                MENU_PRERELEASE => self.toggle_prerelease_updates(),
+                MENU_CHECK => self.start_update_check(),
+                MENU_INSTALL => self.install_update(),
+                MENU_RELEASES => {
+                    if let Err(error) = updater::open_releases_page() {
+                        self.status = format!("Open releases failed: {error}");
+                    }
+                }
+                MENU_QUIT => {
+                    self.quit_requested = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn render_startup_prompt(&mut self, ctx: &egui::Context) {
+        if !self.startup_prompt_open {
+            return;
+        }
+        egui::Window::new("Start Numlon with Windows?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_width(400.0);
+                ui.label("Move numlon.exe to its final folder first. Windows stores its exact path; do not move it after enabling startup.");
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Not now").clicked() {
+                        self.state.startup_prompted = true;
+                        self.startup_prompt_open = false;
+                        self.save();
+                    }
+                    if ui.button("Enable startup").clicked() {
+                        self.state.startup_prompted = true;
+                        self.startup_prompt_open = false;
+                        if let Err(error) = startup::set_enabled(true) {
+                            self.status = format!("Startup update failed: {error}");
+                        } else {
+                            self.state.startup_enabled = true;
+                            self.status = "Windows startup enabled.".to_owned();
+                        }
+                        self.save();
+                        self.sync_tray();
+                    }
+                });
+            });
+    }
+}
+
+impl eframe::App for NumlonApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|input| input.viewport().close_requested()) && !self.quit_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.hide_window(ctx);
+        }
+        self.poll_global_hotkey();
+        self.poll_tray(ctx);
+        self.poll_hotkey_capture(ctx);
+        self.enforce_numlock();
+        self.poll_update_check();
+        ctx.request_repaint_after(EVENT_POLL_INTERVAL);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui.painter().rect_filled(ui.max_rect(), 0, BACKGROUND);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    ui.vertical(|ui| {
+                        ui.set_max_width((ui.available_width() - 20.0).max(320.0));
+                        header(ui);
+                        ui.add_space(14.0);
+
+                        status_card(ui, self);
+                        ui.add_space(10.0);
+
+                        section_label(ui, "Behavior");
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            let available = ui.available_width();
+                            let width = ((available - 8.0) / 2.0).max(210.0);
+                            if mode_option(
+                                ui,
+                                width,
+                                self.state.numlock_mode == NumlockMode::ForceOn,
+                                "NumLock on",
+                                "Keeps keypad numeric",
+                                true,
+                            )
+                            .clicked()
+                            {
+                                self.set_mode(NumlockMode::ForceOn);
+                            }
+                            if mode_option(
+                                ui,
+                                width,
+                                self.state.numlock_mode == NumlockMode::LedOffDigits,
+                                "LED off",
+                                "Maps keypad to digits",
+                                self.keyboard_hook.is_some(),
+                            )
+                            .clicked()
+                            {
+                                self.set_mode(NumlockMode::LedOffDigits);
+                            }
+                        });
+                        ui.add_space(10.0);
+
+                        settings_surface(ui, self);
+                        ui.add_space(12.0);
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(RichText::new("Hide").strong())
+                                            .min_size(egui::vec2(92.0, 34.0))
+                                            .corner_radius(9),
+                                    )
+                                    .clicked()
+                                {
+                                    self.hide_window(ui.ctx());
+                                }
+                            });
+                        });
+                        ui.add_space(16.0);
+                    });
+                });
+            });
+        self.render_startup_prompt(ui.ctx());
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.unregister_hotkey();
+        KeyboardHook::set_remap_active(false);
         self.save();
-        ShowWindow(self.hwnd, SW_HIDE);
     }
 
-    unsafe fn repaint(&self) {
-        InvalidateRect(self.hwnd, ptr::null(), 0);
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        BACKGROUND.to_normalized_gamma_f32()
     }
+}
 
-    unsafe fn update_scrollbar(&mut self) {
-        let mut client = RECT::default();
-        GetClientRect(self.hwnd, &mut client);
-        let viewport_height = (client.bottom - client.top).max(1);
-        let max_offset = (CONTENT_HEIGHT - viewport_height).max(0);
-        self.scroll_offset = self.scroll_offset.clamp(0, max_offset);
+fn configure_egui(ctx: &egui::Context) {
+    const THEME: egui::Theme = egui::Theme::Light;
 
-        let mut info: SCROLLINFO = mem::zeroed();
-        info.cbSize = mem::size_of::<SCROLLINFO>() as u32;
-        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-        info.nMin = 0;
-        info.nMax = CONTENT_HEIGHT.saturating_sub(1);
-        info.nPage = viewport_height as u32;
-        info.nPos = self.scroll_offset;
-        SetScrollInfo(self.hwnd, SB_VERT, &info, 1);
-    }
+    ctx.set_theme(THEME);
 
-    unsafe fn scroll_to(&mut self, position: i32) {
-        let mut client = RECT::default();
-        GetClientRect(self.hwnd, &mut client);
-        let viewport_height = (client.bottom - client.top).max(1);
-        let max_offset = (CONTENT_HEIGHT - viewport_height).max(0);
-        let position = position.clamp(0, max_offset);
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = BACKGROUND;
+    visuals.window_fill = SURFACE;
+    visuals.extreme_bg_color = SURFACE_MUTED;
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(9);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(9);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(9);
+    ctx.set_visuals_of(THEME, visuals);
 
-        if position == self.scroll_offset {
-            return;
-        }
+    let mut style = (*ctx.style_of(THEME)).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
+    style.spacing.interact_size.y = 34.0;
+    ctx.set_style_of(THEME, style);
+}
 
-        self.scroll_offset = position;
-        self.update_scrollbar();
-        self.repaint();
-    }
-
-    unsafe fn scroll_by(&mut self, delta: i32) {
-        self.scroll_to(self.scroll_offset.saturating_add(delta));
-    }
-
-    unsafe fn handle_vscroll(&mut self, request: i32) {
-        match request {
-            SB_LINEUP => self.scroll_by(-SCROLL_STEP),
-            SB_LINEDOWN => self.scroll_by(SCROLL_STEP),
-            SB_PAGEUP => self.scroll_by(-CONTENT_HEIGHT / 2),
-            SB_PAGEDOWN => self.scroll_by(CONTENT_HEIGHT / 2),
-            SB_TOP => self.scroll_to(0),
-            SB_BOTTOM => self.scroll_to(CONTENT_HEIGHT),
-            SB_THUMBPOSITION | SB_THUMBTRACK => {
-                let mut info: SCROLLINFO = mem::zeroed();
-                info.cbSize = mem::size_of::<SCROLLINFO>() as u32;
-                info.fMask = SIF_TRACKPOS;
-                if GetScrollInfo(self.hwnd, SB_VERT, &mut info) != 0 {
-                    self.scroll_to(info.nTrackPos);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    unsafe fn content_origin_x(&self) -> i32 {
-        let mut client = RECT::default();
-        GetClientRect(self.hwnd, &mut client);
-        ((client.right - client.left - CONTENT_WIDTH) / 2).max(0)
-    }
-
-    unsafe fn handle_click(&mut self, x: i32, y: i32) {
-        let x = x - self.content_origin_x();
-        let y = y + self.scroll_offset;
-
-        if ENABLED_SWITCH.contains(x, y) {
-            self.toggle_enabled();
-        } else if MODE_FORCE_ROW.contains(x, y) {
-            self.set_numlock_mode(NumlockMode::ForceOn);
-        } else if MODE_LED_ROW.contains(x, y) {
-            self.set_numlock_mode(NumlockMode::LedOffDigits);
-        } else if HOTKEY_BUTTON.contains(x, y) {
-            self.begin_hotkey_capture();
-        } else if STARTUP_SWITCH.contains(x, y) {
-            self.toggle_startup();
-        } else if !config::is_dev_build() && UPDATE_CHANNEL_SWITCH.contains(x, y) {
-            self.toggle_prerelease_updates();
-        } else if !config::is_dev_build() && UPDATE_ACTION_BUTTON.contains(x, y) {
-            if self.update_is_installable() {
-                self.install_update();
-            } else {
-                self.start_update_check();
-            }
-        } else if HIDE_BUTTON.contains(x, y) {
-            self.hide_window();
-        }
-    }
-
-    unsafe fn show_tray_menu(&mut self) {
-        let menu = CreatePopupMenu();
-        let mode_menu = CreatePopupMenu();
-
-        append_menu(menu, MENU_OPEN, "Open Numlon", MF_STRING);
-        append_separator(menu);
-        append_menu(
-            menu,
-            MENU_TOGGLE_ENABLED,
-            "Enabled",
-            MF_STRING
-                | if self.state.always_enabled {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                },
-        );
-
-        append_menu(
-            mode_menu,
-            MENU_MODE_FORCE_ON,
-            "Keep NumLock on",
-            MF_STRING
-                | if self.state.numlock_mode == NumlockMode::ForceOn {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                },
-        );
-        append_menu(
-            mode_menu,
-            MENU_MODE_LED_OFF,
-            "Keep LED off, type digits",
-            MF_STRING
-                | if self.state.numlock_mode == NumlockMode::LedOffDigits {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                }
-                | if self.keyboard_hook.is_none() {
-                    MF_GRAYED
-                } else {
-                    0
-                },
-        );
-        append_submenu(menu, mode_menu, "Behavior");
-
-        let shortcut_label = format!("Change shortcut...  {}", self.state.hotkey.display());
-        append_menu(menu, MENU_CHANGE_SHORTCUT, &shortcut_label, MF_STRING);
-        append_menu(
-            menu,
-            MENU_TOGGLE_STARTUP,
-            "Start with Windows",
-            MF_STRING
-                | if self.state.startup_enabled {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                }
-                | if config::is_dev_build() { MF_GRAYED } else { 0 },
-        );
-
-        if !config::is_dev_build() {
-            append_separator(menu);
-            append_menu(
-                menu,
-                MENU_TOGGLE_PRERELEASES,
-                "Include prereleases",
-                MF_STRING
-                    | if self.state.include_prereleases {
-                        MF_CHECKED
-                    } else {
-                        MF_UNCHECKED
-                    },
+fn header(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        draw_logo(ui, 44.0, true);
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new("Numlon").size(21.0).strong().color(TEXT));
+            ui.label(
+                RichText::new("Tiny keypad control, without LED drama.")
+                    .size(11.5)
+                    .color(MUTED),
             );
-            append_menu(menu, MENU_CHECK_UPDATES, "Check for updates", MF_STRING);
-            append_menu(
-                menu,
-                MENU_INSTALL_UPDATE,
-                "Install available update",
-                MF_STRING
-                    | if self.update_is_installable() {
-                        0
-                    } else {
-                        MF_GRAYED
-                    },
-            );
-            append_menu(menu, MENU_OPEN_RELEASES, "Open releases", MF_STRING);
-        }
-
-        append_separator(menu);
-        append_menu(menu, MENU_EXIT, "Quit Numlon", MF_STRING);
-        SetMenuDefaultItem(menu, MENU_OPEN as u32, 0);
-
-        let mut point = POINT::default();
-        GetCursorPos(&mut point);
-        SetForegroundWindow(self.hwnd);
-        TrackPopupMenu(
-            menu,
-            TPM_RIGHTBUTTON,
-            point.x,
-            point.y,
-            0,
-            self.hwnd,
-            ptr::null(),
-        );
-        DestroyMenu(menu);
-    }
-
-    unsafe fn handle_command(&mut self, command_id: usize) {
-        match command_id {
-            MENU_OPEN => self.show_window(),
-            MENU_TOGGLE_ENABLED => self.toggle_enabled(),
-            MENU_MODE_FORCE_ON => self.set_numlock_mode(NumlockMode::ForceOn),
-            MENU_MODE_LED_OFF => self.set_numlock_mode(NumlockMode::LedOffDigits),
-            MENU_CHANGE_SHORTCUT => {
-                self.show_window();
-                self.begin_hotkey_capture();
-            }
-            MENU_TOGGLE_STARTUP => self.toggle_startup(),
-            MENU_TOGGLE_PRERELEASES => self.toggle_prerelease_updates(),
-            MENU_CHECK_UPDATES => self.start_update_check(),
-            MENU_INSTALL_UPDATE => self.install_update(),
-            MENU_OPEN_RELEASES => {
-                if let Err(error) = updater::open_releases_page() {
-                    self.status = format!("Open releases failed: {error}");
-                    self.repaint();
-                }
-            }
-            MENU_EXIT => {
-                DestroyWindow(self.hwnd);
-            }
-            _ => {}
-        }
-    }
-
-    unsafe fn paint(&self) {
-        let mut paint = PAINTSTRUCT::default();
-        let target_dc = BeginPaint(self.hwnd, &mut paint);
-        if target_dc.is_null() {
-            return;
-        }
-
-        let mut client = RECT::default();
-        GetClientRect(self.hwnd, &mut client);
-        let width = (client.right - client.left).max(1);
-        let height = (client.bottom - client.top).max(1);
-
-        let buffer_dc = CreateCompatibleDC(target_dc);
-        let buffer_bitmap = if buffer_dc.is_null() {
-            ptr::null_mut()
-        } else {
-            CreateCompatibleBitmap(target_dc, width, height)
-        };
-
-        if !buffer_dc.is_null() && !buffer_bitmap.is_null() {
-            let previous_bitmap = SelectObject(buffer_dc, buffer_bitmap as HGDIOBJ);
-            self.paint_frame(buffer_dc, client);
-            BitBlt(target_dc, 0, 0, width, height, buffer_dc, 0, 0, SRCCOPY);
-            SelectObject(buffer_dc, previous_bitmap);
-            DeleteObject(buffer_bitmap as HGDIOBJ);
-            DeleteDC(buffer_dc);
-        } else {
-            if !buffer_bitmap.is_null() {
-                DeleteObject(buffer_bitmap as HGDIOBJ);
-            }
-            if !buffer_dc.is_null() {
-                DeleteDC(buffer_dc);
-            }
-            self.paint_frame(target_dc, client);
-        }
-
-        EndPaint(self.hwnd, &paint);
-    }
-
-    unsafe fn paint_frame(&self, hdc: HDC, client: RECT) {
-        fill_rect(hdc, client, rgb(245, 245, 243));
-
-        let saved_dc = SaveDC(hdc);
-        SetViewportOrgEx(
-            hdc,
-            self.content_origin_x(),
-            -self.scroll_offset,
-            ptr::null_mut(),
-        );
-
-        draw_header(hdc);
-        draw_surface(hdc, UiRect::new(16, 74, 584, 410));
-        self.draw_enabled_row(hdc);
-        self.draw_behavior_row(hdc);
-        self.draw_hotkey_row(hdc);
-        self.draw_startup_row(hdc);
-        self.draw_updates_row(hdc);
-        self.draw_footer(hdc);
-
-        if saved_dc != 0 {
-            RestoreDC(hdc, saved_dc);
-        }
-    }
-
-    unsafe fn draw_enabled_row(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            if self.state.always_enabled {
-                "Numlon active"
-            } else {
-                "Numlon paused"
-            },
-            UiRect::new(30, 88, 420, 110),
-            15,
-            700,
-            rgb(32, 33, 36),
-            DT_LEFT | DT_SINGLELINE,
-        );
-        draw_text(
-            hdc,
-            if self.state.always_enabled {
-                self.state.numlock_mode.label()
-            } else {
-                "Keyboard state remains unchanged"
-            },
-            UiRect::new(30, 112, 430, 128),
-            11,
-            400,
-            rgb(96, 96, 100),
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_switch(hdc, ENABLED_SWITCH, self.state.always_enabled);
-        draw_divider(hdc, 30, 136, 570);
-    }
-
-    unsafe fn draw_behavior_row(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            "Behavior",
-            UiRect::new(30, 144, 250, 160),
-            11,
-            600,
-            rgb(84, 84, 88),
-            DT_LEFT | DT_SINGLELINE,
-        );
-
-        draw_compact_choice(
-            hdc,
-            MODE_FORCE_ROW,
-            self.state.numlock_mode == NumlockMode::ForceOn,
-            "NumLock on",
-            "Keeps keypad numeric",
-            true,
-        );
-        draw_compact_choice(
-            hdc,
-            MODE_LED_ROW,
-            self.state.numlock_mode == NumlockMode::LedOffDigits,
-            "LED off",
-            "Maps keypad to digits",
-            self.keyboard_hook.is_some(),
-        );
-        draw_divider(hdc, 30, 216, 570);
-    }
-
-    unsafe fn draw_hotkey_row(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            "Toggle shortcut",
-            UiRect::new(30, 228, 300, 248),
-            14,
-            600,
-            rgb(32, 33, 36),
-            DT_LEFT | DT_SINGLELINE,
-        );
-
-        let hotkey_display = self.state.hotkey.display();
-        let hotkey_text = if self.capturing_hotkey {
-            "Press shortcut now. Esc cancels."
-        } else {
-            hotkey_display.as_str()
-        };
-
-        draw_text(
-            hdc,
-            hotkey_text,
-            UiRect::new(30, 250, 420, 268),
-            11,
-            if self.capturing_hotkey { 600 } else { 400 },
-            if self.capturing_hotkey {
-                rgb(125, 88, 0)
-            } else {
-                rgb(96, 96, 100)
-            },
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_button(
-            hdc,
-            HOTKEY_BUTTON,
-            if self.capturing_hotkey {
-                "Listening"
-            } else {
-                "Change"
-            },
-            true,
-        );
-        draw_divider(hdc, 30, 276, 570);
-    }
-
-    unsafe fn draw_startup_row(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            "Start with Windows",
-            UiRect::new(30, 288, 380, 308),
-            14,
-            600,
-            rgb(32, 33, 36),
-            DT_LEFT | DT_SINGLELINE,
-        );
-        draw_text(
-            hdc,
-            if config::is_dev_build() {
-                "Unavailable in development builds"
-            } else if self.state.startup_enabled {
-                "Starts from current executable path"
-            } else {
-                "Move executable to final folder before enabling"
-            },
-            UiRect::new(30, 310, 460, 328),
-            11,
-            400,
-            rgb(96, 96, 100),
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_switch(
-            hdc,
-            STARTUP_SWITCH,
-            self.state.startup_enabled && !config::is_dev_build(),
-        );
-        draw_divider(hdc, 30, 336, 570);
-    }
-
-    unsafe fn draw_updates_row(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            "Updates",
-            UiRect::new(30, 348, 250, 368),
-            14,
-            600,
-            rgb(32, 33, 36),
-            DT_LEFT | DT_SINGLELINE,
-        );
-
-        if config::is_dev_build() {
-            draw_text(
-                hdc,
-                "Disabled in dev — no GitHub API requests",
-                UiRect::new(30, 370, 500, 388),
-                11,
-                400,
-                rgb(96, 96, 100),
-                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-            );
-            return;
-        }
-
-        draw_text(
-            hdc,
-            if self.state.include_prereleases {
-                "Prerelease channel included"
-            } else {
-                "Stable releases only"
-            },
-            UiRect::new(30, 370, 380, 388),
-            11,
-            400,
-            rgb(96, 96, 100),
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_button(
-            hdc,
-            UPDATE_ACTION_BUTTON,
-            if self.update_is_installable() {
-                "Install"
-            } else {
-                "Check"
-            },
-            false,
-        );
-        draw_switch(hdc, UPDATE_CHANNEL_SWITCH, self.state.include_prereleases);
-    }
-
-    unsafe fn draw_footer(&self, hdc: HDC) {
-        draw_text(
-            hdc,
-            &self.status,
-            UiRect::new(20, 438, 452, 478),
-            11,
-            400,
-            rgb(88, 88, 92),
-            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_button(hdc, HIDE_BUTTON, "Hide", false);
-    }
-
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            egui::Frame::new()
+                .fill(YELLOW_SOFT)
+                .stroke(Stroke::new(1.0, YELLOW))
+                .corner_radius(egui::CornerRadius::same(16))
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(config::app_version_label())
+                            .size(11.0)
+                            .strong()
+                            .color(GRAPHITE),
+                    );
+                });
+        });
+    });
 }
 
-fn update_status(check: &updater::UpdateCheck) -> String {
-    let kind = if check.prerelease {
-        "prerelease"
-    } else {
-        "stable"
-    };
-
-    if check.is_update_available {
-        if check.asset_download_url.is_some() {
-            format!("Update available: {kind} v{}.", check.latest_version)
-        } else {
-            format!(
-                "Update available: {kind} v{}, but no Windows executable asset was found.",
-                check.latest_version
-            )
-        }
-    } else {
-        format!(
-            "No newer {kind} release. Current version: v{}.",
-            check.current_version
-        )
-    }
+fn status_card(ui: &mut egui::Ui, app: &mut NumlonApp) {
+    egui::Frame::new()
+        .fill(SURFACE)
+        .stroke(Stroke::new(1.0, BORDER))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(if app.state.always_enabled {
+                            "Numlon active"
+                        } else {
+                            "Numlon paused"
+                        })
+                        .size(15.0)
+                        .strong()
+                        .color(TEXT),
+                    );
+                    ui.label(
+                        RichText::new(if app.state.always_enabled {
+                            app.state.numlock_mode.label()
+                        } else {
+                            "Keyboard state remains untouched"
+                        })
+                        .size(11.0)
+                        .color(MUTED),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let response = toggle_switch(ui, app.state.always_enabled, true);
+                    if response.clicked() {
+                        app.toggle_enabled();
+                    }
+                });
+            });
+        });
 }
 
-unsafe extern "system" fn window_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match message {
-        WM_PAINT => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.paint();
-                0
-            } else {
-                DefWindowProcW(hwnd, message, wparam, lparam)
-            }
-        }
-        WM_ERASEBKGND => 1,
-        WM_SIZE => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.update_scrollbar();
-                app.repaint();
-            }
-            0
-        }
-        WM_VSCROLL => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.handle_vscroll((wparam & 0xffff) as i32);
-            }
-            0
-        }
-        WM_MOUSEWHEEL => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
-                if delta != 0 {
-                    app.scroll_by(-delta.signum() * SCROLL_STEP);
-                }
-            }
-            0
-        }
-        WM_GETMINMAXINFO => {
-            let info = lparam as *mut MINMAXINFO;
-            if !info.is_null() {
-                (*info).ptMinTrackSize.x = MIN_WINDOW_WIDTH;
-                (*info).ptMinTrackSize.y = MIN_WINDOW_HEIGHT;
-            }
-            0
-        }
-        WM_LBUTTONUP => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                let (x, y) = point_from_lparam(lparam);
-                app.handle_click(x, y);
-            }
-            0
-        }
-        WM_KEYDOWN | WM_SYSKEYDOWN => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.capture_hotkey(wparam as u32);
-            }
-            0
-        }
-        WM_COMMAND => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.handle_command((wparam & 0xffff) as usize);
-            }
-            0
-        }
-        WM_HOTKEY => {
-            if wparam as i32 == HOTKEY_TOGGLE_ALWAYS {
-                if let Some(app) = app_from_hwnd(hwnd) {
-                    app.toggle_enabled();
-                }
-            }
-            0
-        }
-        WM_TIMER => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                match wparam {
-                    TIMER_ENFORCE => app.enforce_numlock(),
-                    TIMER_POLL_UPDATES => app.poll_update_check(),
-                    _ => {}
-                }
-            }
-            0
-        }
-        WM_TRAY_ICON => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                match lparam as u32 {
-                    WM_RBUTTONUP => app.show_tray_menu(),
-                    WM_LBUTTONUP | WM_LBUTTONDBLCLK => app.show_window(),
-                    _ => {}
-                }
-            }
-            0
-        }
-        WM_SHOW_EXISTING => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.show_window();
-            }
-            0
-        }
-        WM_CLOSE => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.hide_window();
-            }
-            0
-        }
-        WM_DESTROY => {
-            if let Some(app) = app_from_hwnd(hwnd) {
-                app.unregister_hotkey();
-                KeyboardHook::set_remap_active(false);
-                app.remove_tray_icon();
-                app.save();
-            }
-            PostQuitMessage(0);
-            0
-        }
-        WM_NCDESTROY => {
-            let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            if !app_ptr.is_null() {
-                drop(Box::from_raw(app_ptr));
-            }
-            DefWindowProcW(hwnd, message, wparam, lparam)
-        }
-        _ => DefWindowProcW(hwnd, message, wparam, lparam),
-    }
+fn section_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(RichText::new(text).size(12.0).strong().color(TEXT));
 }
 
-
-unsafe fn resize_to_client(hwnd: HWND, client_width: i32, client_height: i32) {
-    let mut window = RECT::default();
-    let mut client = RECT::default();
-    if GetWindowRect(hwnd, &mut window) == 0 || GetClientRect(hwnd, &mut client) == 0 {
-        return;
-    }
-
-    let frame_width = (window.right - window.left) - (client.right - client.left);
-    let frame_height = (window.bottom - window.top) - (client.bottom - client.top);
-    SetWindowPos(
-        hwnd,
-        ptr::null_mut(),
-        0,
-        0,
-        client_width + frame_width,
-        client_height + frame_height,
-        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-    );
-}
-
-unsafe fn set_window_icons(hwnd: HWND) {
-    let large_icon = load_icon_resource_sized(
-        APP_ICON_RESOURCE_ID,
-        GetSystemMetrics(SM_CXICON),
-        GetSystemMetrics(SM_CYICON),
-    );
-    let small_icon = load_icon_resource_sized(
-        APP_ICON_RESOURCE_ID,
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON),
-    );
-    SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, large_icon as isize);
-    SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, small_icon as isize);
-}
-
-unsafe fn style_window(hwnd: HWND) {
-    let corner = DWMWCP_ROUND;
-    let caption = rgb(243, 243, 240);
-    let border = rgb(226, 226, 220);
-    let text = rgb(28, 28, 30);
-
-    let _ = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-        &corner as *const _ as *const _,
-        mem::size_of_val(&corner) as u32,
-    );
-    let _ = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_CAPTION_COLOR as u32,
-        &caption as *const _ as *const _,
-        mem::size_of_val(&caption) as u32,
-    );
-    let _ = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_BORDER_COLOR as u32,
-        &border as *const _ as *const _,
-        mem::size_of_val(&border) as u32,
-    );
-    let _ = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_TEXT_COLOR as u32,
-        &text as *const _ as *const _,
-        mem::size_of_val(&text) as u32,
-    );
-}
-
-unsafe fn draw_header(hdc: HDC) {
-    DrawIconEx(
-        hdc,
-        20,
-        16,
-        load_icon_resource_sized(APP_ICON_RESOURCE_ID, 40, 40),
-        40,
-        40,
-        0,
-        ptr::null_mut(),
-        DI_NORMAL,
-    );
-    draw_text(
-        hdc,
-        "Numlon",
-        UiRect::new(72, 14, 360, 38),
-        20,
-        700,
-        rgb(32, 33, 36),
-        DT_LEFT | DT_SINGLELINE,
-    );
-    draw_text(
-        hdc,
-        "NumLock control for Windows",
-        UiRect::new(72, 40, 420, 58),
-        11,
-        400,
-        rgb(96, 96, 100),
-        DT_LEFT | DT_SINGLELINE,
-    );
-    draw_pill(
-        hdc,
-        UiRect::new(474, 18, 584, 48),
-        &config::app_version_label(),
-    );
-}
-
-unsafe fn draw_surface(hdc: HDC, rect: UiRect) {
-    draw_rounded_rect(
-        hdc,
-        rect,
-        14,
-        rgb(255, 255, 255),
-        rgb(224, 224, 226),
-    );
-}
-
-unsafe fn draw_divider(hdc: HDC, left: i32, top: i32, right: i32) {
-    fill_rect(
-        hdc,
-        RECT {
-            left,
-            top,
-            right,
-            bottom: top + 1,
-        },
-        rgb(232, 232, 234),
-    );
-}
-
-unsafe fn draw_compact_choice(
-    hdc: HDC,
-    rect: UiRect,
+fn mode_option(
+    ui: &mut egui::Ui,
+    width: f32,
     selected: bool,
     title: &str,
     subtitle: &str,
     enabled: bool,
-) {
-    let fill = if selected {
-        rgb(255, 247, 214)
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 54.0), Sense::click());
+    let response = if enabled { response } else { response.on_disabled_hover_text("Unavailable") };
+    let fill = if selected { YELLOW_SOFT } else { SURFACE_MUTED };
+    let stroke = if selected {
+        Stroke::new(1.0, YELLOW)
     } else {
-        rgb(248, 248, 249)
+        Stroke::new(1.0, BORDER)
     };
-    draw_filled_rounded_rect(hdc, rect, 10, fill);
-    draw_radio(
-        hdc,
-        UiRect::new(rect.left + 11, rect.top + 12, rect.left + 31, rect.top + 32),
-        selected,
-    );
+    let corner_radius = egui::CornerRadius::same(10);
+    ui.painter().rect_filled(rect, corner_radius, fill);
+    ui.painter()
+        .rect_stroke(rect, corner_radius, stroke, egui::StrokeKind::Inside);
 
-    let title_color = if enabled {
-        rgb(32, 33, 36)
-    } else {
-        rgb(148, 148, 152)
-    };
-    let subtitle_color = if enabled {
-        rgb(96, 96, 100)
-    } else {
-        rgb(164, 164, 168)
-    };
-
-    draw_text(
-        hdc,
-        title,
-        UiRect::new(rect.left + 42, rect.top + 7, rect.right - 10, rect.top + 23),
-        12,
-        600,
-        title_color,
-        DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-    );
-    draw_text(
-        hdc,
-        subtitle,
-        UiRect::new(rect.left + 42, rect.top + 24, rect.right - 10, rect.bottom - 5),
-        10,
-        400,
-        subtitle_color,
-        DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-    );
-}
-
-unsafe fn draw_switch(hdc: HDC, rect: UiRect, enabled: bool) {
-    let track = if enabled {
-        rgb(255, 200, 32)
-    } else {
-        rgb(205, 205, 202)
-    };
-    let track_radius = (rect.bottom - rect.top) / 2;
-    draw_filled_rounded_rect(hdc, rect, track_radius, track);
-
-    let knob_size = 24;
-    let knob_top = rect.top + ((rect.bottom - rect.top - knob_size) / 2);
-    let knob_left = if enabled {
-        rect.right - knob_size - 4
-    } else {
-        rect.left + 4
-    };
-    draw_filled_ellipse(
-        hdc,
-        UiRect::new(
-            knob_left,
-            knob_top,
-            knob_left + knob_size,
-            knob_top + knob_size,
-        ),
-        rgb(255, 255, 255),
-    );
-}
-
-unsafe fn draw_radio(hdc: HDC, rect: UiRect, selected: bool) {
+    let radio_center = egui::pos2(rect.left() + 20.0, rect.center().y);
+    ui.painter().circle_filled(radio_center, 9.0, SURFACE);
+    ui.painter()
+        .circle_stroke(radio_center, 9.0, Stroke::new(1.0, if selected { YELLOW } else { BORDER }));
     if selected {
-        draw_filled_ellipse(hdc, rect, rgb(255, 200, 32));
-        draw_filled_ellipse(
-            hdc,
-            UiRect::new(rect.left + 6, rect.top + 6, rect.right - 6, rect.bottom - 6),
-            rgb(63, 52, 18),
-        );
-    } else {
-        draw_filled_ellipse(hdc, rect, rgb(180, 180, 177));
-        draw_filled_ellipse(
-            hdc,
-            UiRect::new(rect.left + 2, rect.top + 2, rect.right - 2, rect.bottom - 2),
-            rgb(255, 255, 255),
-        );
+        ui.painter().circle_filled(radio_center, 4.0, GRAPHITE);
     }
+    let color = if enabled { TEXT } else { MUTED };
+    ui.painter().text(
+        egui::pos2(rect.left() + 38.0, rect.top() + 14.0),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(12.5),
+        color,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 38.0, rect.top() + 35.0),
+        Align2::LEFT_CENTER,
+        subtitle,
+        FontId::proportional(10.5),
+        MUTED,
+    );
+    response
 }
 
-unsafe fn draw_button(hdc: HDC, rect: UiRect, text: &str, primary: bool) {
-    let fill = if primary {
-        rgb(255, 200, 32)
-    } else {
-        rgb(246, 246, 243)
-    };
-    let border = if primary {
-        rgb(255, 200, 32)
-    } else {
-        rgb(230, 230, 226)
-    };
-    draw_rounded_rect(hdc, rect, 14, fill, border);
-    draw_text(
-        hdc,
-        text,
-        rect,
-        12,
-        700,
-        if primary {
-            rgb(70, 53, 0)
-        } else {
-            rgb(48, 48, 46)
+fn settings_surface(ui: &mut egui::Ui, app: &mut NumlonApp) {
+    egui::Frame::new()
+        .fill(SURFACE)
+        .stroke(Stroke::new(1.0, BORDER))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(14, 4))
+        .show(ui, |ui| {
+            setting_row(ui, "Toggle shortcut", &app.state.hotkey.display(), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(if app.capturing_hotkey {
+                            "Listening…"
+                        } else {
+                            "Change"
+                        })
+                        .min_size(egui::vec2(100.0, 34.0))
+                        .fill(YELLOW)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(9),
+                    )
+                    .clicked()
+                {
+                    app.begin_hotkey_capture(ui.ctx());
+                }
+            });
+            ui.separator();
+            setting_row(
+                ui,
+                "Start with Windows",
+                if config::is_dev_build() {
+                    "Unavailable in development builds"
+                } else if app.state.startup_enabled {
+                    "Uses current executable path"
+                } else {
+                    "Keep executable in final folder before enabling"
+                },
+                |ui| {
+                    let response = toggle_switch(
+                        ui,
+                        app.state.startup_enabled && !config::is_dev_build(),
+                        !config::is_dev_build(),
+                    );
+                    if response.clicked() && !config::is_dev_build() {
+                        app.toggle_startup();
+                    }
+                },
+            );
+            ui.separator();
+            setting_row(
+                ui,
+                "Updates",
+                if config::is_dev_build() {
+                    "Disabled in dev — no GitHub API requests"
+                } else if app.state.include_prereleases {
+                    "Prerelease channel"
+                } else {
+                    "Stable channel"
+                },
+                |ui| {
+                    if config::is_dev_build() {
+                        ui.label(RichText::new("Dev").size(11.0).color(MUTED));
+                    } else {
+                        if ui
+                            .add(
+                                egui::Button::new(if app.update_is_installable() {
+                                    "Install"
+                                } else {
+                                    "Check"
+                                })
+                                .min_size(egui::vec2(74.0, 32.0))
+                                .corner_radius(8),
+                            )
+                            .clicked()
+                        {
+                            if app.update_is_installable() {
+                                app.install_update();
+                            } else {
+                                app.start_update_check();
+                            }
+                        }
+                        let response = toggle_switch(ui, app.state.include_prereleases, true);
+                        if response.clicked() {
+                            app.toggle_prerelease_updates();
+                        }
+                    }
+                },
+            );
+        });
+}
+
+fn setting_row(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    trailing: impl FnOnce(&mut egui::Ui),
+) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 58.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new(title).size(13.0).strong().color(TEXT));
+                ui.label(RichText::new(subtitle).size(10.5).color(MUTED));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), trailing);
         },
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
     );
 }
 
-unsafe fn draw_pill(hdc: HDC, rect: UiRect, text: &str) {
-    draw_rounded_rect(
-        hdc,
-        rect,
-        18,
-        rgb(255, 250, 225),
-        rgb(255, 215, 84),
-    );
-    draw_text(
-        hdc,
-        text,
-        rect,
-        11,
-        700,
-        rgb(91, 69, 0),
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
-    );
-}
-
-unsafe fn draw_filled_rounded_rect(
-    hdc: HDC,
-    rect: UiRect,
-    radius: i32,
-    fill: COLORREF,
-) {
-    if crate::gdi_plus::fill_rounded_rect(
-        hdc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        radius,
-        fill,
-    ) {
-        return;
-    }
-
-    draw_rounded_rect(hdc, rect, radius, fill, fill);
-}
-
-unsafe fn draw_filled_ellipse(hdc: HDC, rect: UiRect, fill: COLORREF) {
-    if crate::gdi_plus::fill_ellipse(
-        hdc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        fill,
-    ) {
-        return;
-    }
-
-    draw_ellipse(hdc, rect, fill, fill);
-}
-
-unsafe fn draw_rounded_rect(
-    hdc: HDC,
-    rect: UiRect,
-    radius: i32,
-    fill: COLORREF,
-    border: COLORREF,
-) {
-    if crate::gdi_plus::draw_rounded_rect(
-        hdc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        radius,
-        fill,
-        border,
-    ) {
-        return;
-    }
-
-    let brush = CreateSolidBrush(fill);
-    let pen = CreatePen(PS_SOLID, 1, border);
-    let old_brush = SelectObject(hdc, brush as HGDIOBJ);
-    let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-
-    RoundRect(
-        hdc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        radius * 2,
-        radius * 2,
-    );
-
-    SelectObject(hdc, old_pen);
-    SelectObject(hdc, old_brush);
-    DeleteObject(pen as HGDIOBJ);
-    DeleteObject(brush as HGDIOBJ);
-}
-
-unsafe fn draw_ellipse(hdc: HDC, rect: UiRect, fill: COLORREF, border: COLORREF) {
-    if crate::gdi_plus::draw_ellipse(
-        hdc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        fill,
-        border,
-    ) {
-        return;
-    }
-
-    let brush = CreateSolidBrush(fill);
-    let pen = CreatePen(PS_SOLID, 1, border);
-    let old_brush = SelectObject(hdc, brush as HGDIOBJ);
-    let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-
-    Ellipse(hdc, rect.left, rect.top, rect.right, rect.bottom);
-
-    SelectObject(hdc, old_pen);
-    SelectObject(hdc, old_brush);
-    DeleteObject(pen as HGDIOBJ);
-    DeleteObject(brush as HGDIOBJ);
-}
-
-unsafe fn fill_rect(hdc: HDC, rect: RECT, color: COLORREF) {
-    let brush: HBRUSH = CreateSolidBrush(color);
-    FillRect(hdc, &rect, brush);
-    DeleteObject(brush as HGDIOBJ);
-}
-
-unsafe fn draw_text(
-    hdc: HDC,
-    text: &str,
-    rect: UiRect,
-    size: i32,
-    weight: i32,
-    color: COLORREF,
-    format: u32,
-) {
-    let face = str_wide_null("Segoe UI Variable Text");
-    let font = CreateFontW(
-        -size,
-        0,
-        0,
-        0,
-        weight,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
-        5,
-        0,
-        face.as_ptr(),
-    );
-
-    let old_font = if font.is_null() {
-        ptr::null_mut()
+fn toggle_switch(ui: &mut egui::Ui, on: bool, enabled: bool) -> egui::Response {
+    let size = egui::vec2(48.0, 28.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let response = if enabled { response } else { response.on_disabled_hover_text("Unavailable") };
+    let animation = ui.ctx().animate_bool(response.id, on);
+    let track = if enabled {
+        if on { YELLOW } else { Color32::from_rgb(206, 207, 204) }
     } else {
-        SelectObject(hdc, font as HGDIOBJ)
+        Color32::from_rgb(220, 220, 217)
     };
+    let track_radius = rect.height() * 0.5;
+    let knob_radius = 10.0;
+    ui.painter().rect_filled(rect, track_radius, track);
+    let x = egui::lerp(
+        (rect.left() + track_radius)..=(rect.right() - track_radius),
+        animation,
+    );
+    ui.painter()
+        .circle_filled(egui::pos2(x, rect.center().y), knob_radius, SURFACE);
+    response
+}
 
-    SetBkMode(hdc, TRANSPARENT as i32);
-    SetTextColor(hdc, color);
-
-    let mut text = str_wide_null(text);
-    let mut rect = rect.to_rect();
-    DrawTextW(hdc, text.as_mut_ptr(), -1, &mut rect, format);
-
-    if !font.is_null() {
-        SelectObject(hdc, old_font);
-        DeleteObject(font as HGDIOBJ);
+fn draw_logo(ui: &mut egui::Ui, size: f32, active: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 8, GRAPHITE);
+    let gap = size * 0.085;
+    let padding = size * 0.18;
+    let key = (size - padding * 2.0 - gap * 2.0) / 3.0;
+    for row in 0..3 {
+        for column in 0..3 {
+            let min = egui::pos2(
+                rect.left() + padding + column as f32 * (key + gap),
+                rect.top() + padding + row as f32 * (key + gap),
+            );
+            let key_rect = egui::Rect::from_min_size(min, egui::vec2(key, key));
+            let is_active = row == 2 && column == 2;
+            painter.rect_filled(
+                key_rect,
+                2,
+                if is_active {
+                    if active { YELLOW } else { Color32::from_rgb(139, 145, 157) }
+                } else {
+                    Color32::from_rgb(233, 235, 239)
+                },
+            );
+        }
     }
 }
 
-unsafe fn load_app_icon() -> *mut std::ffi::c_void {
-    load_icon_resource_sized(
-        APP_ICON_RESOURCE_ID,
-        GetSystemMetrics(SM_CXICON),
-        GetSystemMetrics(SM_CYICON),
+fn load_window_icon(bytes: &[u8]) -> Result<egui::IconData> {
+    let image = image::load_from_memory(bytes)
+        .context("failed to decode embedded window icon")?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    Ok(egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
+fn load_tray_image(bytes: &[u8]) -> Result<TrayImage> {
+    let image = image::load_from_memory(bytes)
+        .context("failed to decode embedded tray icon")?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    TrayImage::from_rgba(image.into_raw(), width, height)
+        .map_err(|error| anyhow::anyhow!("invalid tray icon: {error}"))
+}
+
+fn tray_tooltip(state: &SavedState) -> String {
+    format!(
+        "Numlon {} — {} — {}",
+        config::app_version_label(),
+        if state.always_enabled {
+            state.numlock_mode.label()
+        } else {
+            "Paused"
+        },
+        state.hotkey.display()
     )
 }
 
-unsafe fn load_tray_icon(enabled: bool) -> *mut std::ffi::c_void {
-    load_icon_resource_sized(
-        if enabled {
-            APP_ICON_RESOURCE_ID
-        } else {
-            PAUSED_ICON_RESOURCE_ID
-        },
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON),
-    )
-}
-
-unsafe fn load_icon_resource_sized(
-    resource_id: u16,
-    width: i32,
-    height: i32,
-) -> *mut std::ffi::c_void {
-    let instance = GetModuleHandleW(ptr::null());
-    let icon = LoadImageW(
-        instance,
-        make_int_resource(resource_id),
-        IMAGE_ICON,
-        width.max(1),
-        height.max(1),
-        LR_SHARED,
-    );
-    if icon.is_null() {
-        LoadIconW(ptr::null_mut(), IDI_APPLICATION)
+fn update_status(check: &updater::UpdateCheck) -> String {
+    if check.is_update_available {
+        format!("Update available: v{}.", check.latest_version)
     } else {
-        icon
+        format!("No newer release. Current version: v{}.", check.current_version)
     }
 }
 
-fn make_int_resource(id: u16) -> *const u16 {
-    id as usize as *const u16
+fn egui_key_name(key: egui::Key) -> Option<String> {
+    use egui::Key;
+    let name = match key {
+        Key::Home => "Home",
+        Key::End => "End",
+        Key::PageUp => "PageUp",
+        Key::PageDown => "PageDown",
+        Key::Insert => "Insert",
+        Key::Delete => "Delete",
+        Key::ArrowLeft => "Left",
+        Key::ArrowRight => "Right",
+        Key::ArrowUp => "Up",
+        Key::ArrowDown => "Down",
+        Key::Space => "Space",
+        Key::Tab => "Tab",
+        Key::Enter => "Enter",
+        Key::Escape => "Escape",
+        Key::Num0 => "0",
+        Key::Num1 => "1",
+        Key::Num2 => "2",
+        Key::Num3 => "3",
+        Key::Num4 => "4",
+        Key::Num5 => "5",
+        Key::Num6 => "6",
+        Key::Num7 => "7",
+        Key::Num8 => "8",
+        Key::Num9 => "9",
+        Key::A => "A",
+        Key::B => "B",
+        Key::C => "C",
+        Key::D => "D",
+        Key::E => "E",
+        Key::F => "F",
+        Key::G => "G",
+        Key::H => "H",
+        Key::I => "I",
+        Key::J => "J",
+        Key::K => "K",
+        Key::L => "L",
+        Key::M => "M",
+        Key::N => "N",
+        Key::O => "O",
+        Key::P => "P",
+        Key::Q => "Q",
+        Key::R => "R",
+        Key::S => "S",
+        Key::T => "T",
+        Key::U => "U",
+        Key::V => "V",
+        Key::W => "W",
+        Key::X => "X",
+        Key::Y => "Y",
+        Key::Z => "Z",
+        Key::F1 => "F1",
+        Key::F2 => "F2",
+        Key::F3 => "F3",
+        Key::F4 => "F4",
+        Key::F5 => "F5",
+        Key::F6 => "F6",
+        Key::F7 => "F7",
+        Key::F8 => "F8",
+        Key::F9 => "F9",
+        Key::F10 => "F10",
+        Key::F11 => "F11",
+        Key::F12 => "F12",
+        Key::F13 => "F13",
+        Key::F14 => "F14",
+        Key::F15 => "F15",
+        Key::F16 => "F16",
+        Key::F17 => "F17",
+        Key::F18 => "F18",
+        Key::F19 => "F19",
+        Key::F20 => "F20",
+        Key::F21 => "F21",
+        Key::F22 => "F22",
+        Key::F23 => "F23",
+        Key::F24 => "F24",
+        _ => return None,
+    };
+    Some(name.to_owned())
 }
 
-unsafe fn app_from_hwnd(hwnd: HWND) -> Option<&'static mut App> {
-    let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
-    pointer.as_mut()
-}
-
-unsafe fn message_box(hwnd: HWND, text: &str, title: &str, flags: u32) -> i32 {
-    let text = str_wide_null(text);
-    let title = str_wide_null(title);
-    MessageBoxW(hwnd, text.as_ptr(), title.as_ptr(), flags)
-}
-
-unsafe fn append_menu(menu: HMENU, id: usize, text: &str, flags: u32) {
-    let text = str_wide_null(text);
-    AppendMenuW(menu, flags, id, text.as_ptr());
-}
-
-unsafe fn append_submenu(menu: HMENU, submenu: HMENU, text: &str) {
-    let text = str_wide_null(text);
-    AppendMenuW(menu, MF_POPUP | MF_STRING, submenu as usize, text.as_ptr());
-}
-
-unsafe fn append_separator(menu: HMENU) {
-    AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null());
-}
-
-fn point_from_lparam(lparam: LPARAM) -> (i32, i32) {
-    let x = lparam as i16 as i32;
-    let y = ((lparam >> 16) as i16) as i32;
-    (x, y)
-}
-
-const fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
-    red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
-}
-
-#[derive(Clone, Copy)]
-struct UiRect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-}
-
-impl UiRect {
-    const fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
-        Self {
-            left,
-            top,
-            right,
-            bottom,
-        }
-    }
-
-    const fn contains(self, x: i32, y: i32) -> bool {
-        x >= self.left && x <= self.right && y >= self.top && y <= self.bottom
-    }
-
-    const fn to_rect(self) -> RECT {
-        RECT {
-            left: self.left,
-            top: self.top,
-            right: self.right,
-            bottom: self.bottom,
-        }
-    }
+fn key_is_down(key: u16) -> bool {
+    unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(key as i32) < 0 }
 }
