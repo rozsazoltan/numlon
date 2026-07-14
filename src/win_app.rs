@@ -14,11 +14,12 @@ use windows_sys::Win32::{
             DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
         },
         Gdi::{
-            BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
-            Ellipse, EndPaint, FillRect, InvalidateRect, RestoreDC, RoundRect, SaveDC,
-            SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, HBRUSH, HDC, HGDIOBJ,
-            PAINTSTRUCT, PS_SOLID, TRANSPARENT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT,
-            DT_SINGLELINE, DT_VCENTER,
+            BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
+            CreatePen, CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint,
+            FillRect, InvalidateRect, RestoreDC, RoundRect, SaveDC, SelectObject, SetBkMode,
+            SetTextColor, SetViewportOrgEx, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID,
+            SRCCOPY, TRANSPARENT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+            DT_VCENTER,
         },
     },
     System::LibraryLoader::GetModuleHandleW,
@@ -950,13 +951,44 @@ impl App {
 
     unsafe fn paint(&self) {
         let mut paint = PAINTSTRUCT::default();
-        let hdc = BeginPaint(self.hwnd, &mut paint);
-        if hdc.is_null() {
+        let target_dc = BeginPaint(self.hwnd, &mut paint);
+        if target_dc.is_null() {
             return;
         }
 
         let mut client = RECT::default();
         GetClientRect(self.hwnd, &mut client);
+        let width = (client.right - client.left).max(1);
+        let height = (client.bottom - client.top).max(1);
+
+        let buffer_dc = CreateCompatibleDC(target_dc);
+        let buffer_bitmap = if buffer_dc.is_null() {
+            ptr::null_mut()
+        } else {
+            CreateCompatibleBitmap(target_dc, width, height)
+        };
+
+        if !buffer_dc.is_null() && !buffer_bitmap.is_null() {
+            let previous_bitmap = SelectObject(buffer_dc, buffer_bitmap as HGDIOBJ);
+            self.paint_frame(buffer_dc, client);
+            BitBlt(target_dc, 0, 0, width, height, buffer_dc, 0, 0, SRCCOPY);
+            SelectObject(buffer_dc, previous_bitmap);
+            DeleteObject(buffer_bitmap as HGDIOBJ);
+            DeleteDC(buffer_dc);
+        } else {
+            if !buffer_bitmap.is_null() {
+                DeleteObject(buffer_bitmap as HGDIOBJ);
+            }
+            if !buffer_dc.is_null() {
+                DeleteDC(buffer_dc);
+            }
+            self.paint_frame(target_dc, client);
+        }
+
+        EndPaint(self.hwnd, &paint);
+    }
+
+    unsafe fn paint_frame(&self, hdc: HDC, client: RECT) {
         fill_rect(hdc, client, rgb(245, 245, 243));
 
         let saved_dc = SaveDC(hdc);
@@ -979,7 +1011,6 @@ impl App {
         if saved_dc != 0 {
             RestoreDC(hdc, saved_dc);
         }
-        EndPaint(self.hwnd, &paint);
     }
 
     unsafe fn draw_enabled_row(&self, hdc: HDC) {
@@ -1477,15 +1508,10 @@ unsafe fn draw_compact_choice(
     } else {
         rgb(248, 248, 249)
     };
-    let border = if selected {
-        rgb(255, 185, 0)
-    } else {
-        rgb(224, 224, 226)
-    };
-    draw_rounded_rect(hdc, rect, 10, fill, border);
+    draw_filled_rounded_rect(hdc, rect, 10, fill);
     draw_radio(
         hdc,
-        UiRect::new(rect.left + 12, rect.top + 13, rect.left + 30, rect.top + 31),
+        UiRect::new(rect.left + 11, rect.top + 12, rect.left + 31, rect.top + 32),
         selected,
     );
 
@@ -1503,7 +1529,7 @@ unsafe fn draw_compact_choice(
     draw_text(
         hdc,
         title,
-        UiRect::new(rect.left + 40, rect.top + 7, rect.right - 10, rect.top + 23),
+        UiRect::new(rect.left + 42, rect.top + 7, rect.right - 10, rect.top + 23),
         12,
         600,
         title_color,
@@ -1512,7 +1538,7 @@ unsafe fn draw_compact_choice(
     draw_text(
         hdc,
         subtitle,
-        UiRect::new(rect.left + 40, rect.top + 24, rect.right - 10, rect.bottom - 5),
+        UiRect::new(rect.left + 42, rect.top + 24, rect.right - 10, rect.bottom - 5),
         10,
         400,
         subtitle_color,

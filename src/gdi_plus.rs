@@ -10,7 +10,9 @@ const FILL_MODE_ALTERNATE: i32 = 0;
 const UNIT_PIXEL: i32 = 2;
 const SMOOTHING_MODE_ANTI_ALIAS_8X8: i32 = 6;
 const PIXEL_OFFSET_MODE_HALF: i32 = 4;
+const COMPOSITING_MODE_SOURCE_OVER: i32 = 0;
 const COMPOSITING_QUALITY_GAMMA_CORRECTED: i32 = 3;
+const INTERPOLATION_MODE_HIGH_QUALITY_BICUBIC: i32 = 7;
 
 #[repr(C)]
 struct GdiplusStartupInput {
@@ -144,13 +146,15 @@ pub unsafe fn fill_rounded_rect(
     };
     graphics.configure();
 
-    let width = width as f32;
-    let height = height as f32;
+    let x = left as f32 + 0.5;
+    let y = top as f32 + 0.5;
+    let width = (width - 1).max(1) as f32;
+    let height = (height - 1).max(1) as f32;
     let radius = (radius.max(1) as f32).min(width / 2.0).min(height / 2.0);
 
     let Some(path) = PathHandle::rounded_rect(
-        left as f32,
-        top as f32,
+        x,
+        y,
         width,
         height,
         radius,
@@ -190,10 +194,10 @@ pub unsafe fn fill_ellipse(
     GdipFillEllipse(
         graphics.raw,
         brush.raw.cast(),
-        left as f32,
-        top as f32,
-        width as f32,
-        height as f32,
+        left as f32 + 0.5,
+        top as f32 + 0.5,
+        (width - 1).max(1) as f32,
+        (height - 1).max(1) as f32,
     ) == STATUS_OK
 }
 
@@ -216,11 +220,17 @@ impl Graphics {
     }
 
     unsafe fn configure(&self) {
-        let _ = GdipSetSmoothingMode(self.raw, SMOOTHING_MODE_ANTI_ALIAS_8X8);
-        let _ = GdipSetPixelOffsetMode(self.raw, PIXEL_OFFSET_MODE_HALF);
+        let _ = GdipSetPageUnit(self.raw, UNIT_PIXEL);
+        let _ = GdipSetCompositingMode(self.raw, COMPOSITING_MODE_SOURCE_OVER);
         let _ = GdipSetCompositingQuality(
             self.raw,
             COMPOSITING_QUALITY_GAMMA_CORRECTED,
+        );
+        let _ = GdipSetSmoothingMode(self.raw, SMOOTHING_MODE_ANTI_ALIAS_8X8);
+        let _ = GdipSetPixelOffsetMode(self.raw, PIXEL_OFFSET_MODE_HALF);
+        let _ = GdipSetInterpolationMode(
+            self.raw,
+            INTERPOLATION_MODE_HIGH_QUALITY_BICUBIC,
         );
     }
 }
@@ -352,9 +362,12 @@ unsafe extern "system" {
 
     fn GdipCreateFromHDC(hdc: HDC, graphics: *mut *mut c_void) -> i32;
     fn GdipDeleteGraphics(graphics: *mut c_void) -> i32;
+    fn GdipSetPageUnit(graphics: *mut c_void, unit: i32) -> i32;
+    fn GdipSetCompositingMode(graphics: *mut c_void, compositing_mode: i32) -> i32;
+    fn GdipSetCompositingQuality(graphics: *mut c_void, compositing_quality: i32) -> i32;
     fn GdipSetSmoothingMode(graphics: *mut c_void, smoothing_mode: i32) -> i32;
     fn GdipSetPixelOffsetMode(graphics: *mut c_void, pixel_offset_mode: i32) -> i32;
-    fn GdipSetCompositingQuality(graphics: *mut c_void, compositing_quality: i32) -> i32;
+    fn GdipSetInterpolationMode(graphics: *mut c_void, interpolation_mode: i32) -> i32;
 
     fn GdipCreateSolidFill(color: u32, brush: *mut *mut c_void) -> i32;
     fn GdipDeleteBrush(brush: *mut c_void) -> i32;

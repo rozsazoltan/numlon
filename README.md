@@ -65,7 +65,7 @@ The shortcut is stored next to the executable in `.numlon-data/config.json`.
 
 ### Tray mode
 
-Numlon lives in Windows notification area. Yellow tray icon opens app on left click. Paused state switches tray icon to monochrome. Right click menu provides:
+Numlon lives in Windows notification area. Yellow keypad tray icon opens app on left click. Paused state uses same geometry with muted accent. Right click menu provides:
 
 - enabled state
 - behavior mode
@@ -107,7 +107,7 @@ assets/numlon.ico
 assets/numlon-paused.ico
 ```
 
-`build.rs` embeds multi-size `assets/numlon.ico` into Windows executable. The ICO contains hand-tuned 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 pixel frames. `assets/numlon.svg` remains vector source.
+`build.rs` embeds multi-size `assets/numlon.ico` into Windows executable. The ICO contains exact-size 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128, and 256 pixel frames. `assets/numlon.svg` remains vector source.
 
 ## Get started
 
