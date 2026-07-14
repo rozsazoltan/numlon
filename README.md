@@ -101,10 +101,10 @@ Primary accent:
 Executable and tray icon assets:
 
 ```text
+assets/numlon.svg
+assets/numlon-paused.svg
 assets/numlon.ico
-assets/numlon-icon-source.png
 assets/numlon-paused.ico
-assets/numlon-paused-icon-source.png
 ```
 
 `build.rs` embeds `assets/numlon.ico` into Windows executable.

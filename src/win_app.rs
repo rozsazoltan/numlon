@@ -15,8 +15,8 @@ use windows_sys::Win32::{
         },
         Gdi::{
             BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
-            Ellipse, EndPaint, FillRect, RoundRect, SelectObject, SetBkMode, SetTextColor,
-            HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID, TRANSPARENT, DT_CENTER,
+            Ellipse, EndPaint, FillRect, InvalidateRect, RoundRect, SelectObject, SetBkMode,
+            SetTextColor, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID, TRANSPARENT, DT_CENTER,
             DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_TOP, DT_VCENTER, DT_WORDBREAK,
         },
     },
@@ -32,8 +32,8 @@ use windows_sys::Win32::{
         WindowsAndMessaging::{
             AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
             DestroyWindow, DispatchMessageW, DrawIconEx, FindWindowW, GetClientRect, GetCursorPos,
-            GetMessageW, GetWindowLongPtrW,
-            GetWindowRect, InvalidateRect, IsIconic, LoadCursorW, LoadIconW, MessageBoxW,
+            GetMessageW, GetWindowLongPtrW, GetWindowRect, IsIconic, LoadCursorW, LoadIconW,
+            MessageBoxW,
             PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetMenuDefaultItem,
             SetTimer, SetWindowLongPtrW, ShowWindow, TrackPopupMenu, TranslateMessage,
             CW_USEDEFAULT, DI_NORMAL, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION,
@@ -69,8 +69,8 @@ const ENFORCE_INTERVAL_MS: u32 = 300;
 const UPDATE_POLL_INTERVAL_MS: u32 = 250;
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
-const WINDOW_WIDTH: i32 = 660;
-const WINDOW_HEIGHT: i32 = 800;
+const WINDOW_WIDTH: i32 = 636;
+const WINDOW_HEIGHT: i32 = 736;
 
 const MENU_OPEN: usize = 2001;
 const MENU_TOGGLE_ENABLED: usize = 2002;
@@ -84,14 +84,14 @@ const MENU_INSTALL_UPDATE: usize = 2009;
 const MENU_OPEN_RELEASES: usize = 2010;
 const MENU_EXIT: usize = 2011;
 
-const ENABLED_SWITCH: UiRect = UiRect::new(540, 128, 596, 158);
-const MODE_FORCE_ROW: UiRect = UiRect::new(36, 246, 604, 298);
-const MODE_LED_ROW: UiRect = UiRect::new(36, 306, 604, 358);
-const HOTKEY_BUTTON: UiRect = UiRect::new(480, 418, 592, 456);
-const STARTUP_SWITCH: UiRect = UiRect::new(540, 524, 596, 554);
-const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(540, 622, 596, 652);
-const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(426, 616, 522, 658);
-const HIDE_BUTTON: UiRect = UiRect::new(510, 700, 604, 738);
+const ENABLED_SWITCH: UiRect = UiRect::new(532, 118, 590, 150);
+const MODE_FORCE_ROW: UiRect = UiRect::new(30, 224, 606, 274);
+const MODE_LED_ROW: UiRect = UiRect::new(30, 280, 606, 330);
+const HOTKEY_BUTTON: UiRect = UiRect::new(476, 384, 592, 422);
+const STARTUP_SWITCH: UiRect = UiRect::new(532, 470, 590, 502);
+const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(532, 560, 590, 592);
+const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(420, 556, 516, 598);
+const HIDE_BUTTON: UiRect = UiRect::new(494, 662, 600, 700);
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
@@ -859,7 +859,7 @@ impl App {
 
         let mut client = RECT::default();
         GetClientRect(self.hwnd, &mut client);
-        fill_rect(hdc, client, rgb(247, 247, 244));
+        fill_rect(hdc, client, rgb(243, 243, 240));
 
         draw_header(hdc);
         self.draw_enabled_card(hdc);
@@ -873,11 +873,11 @@ impl App {
     }
 
     unsafe fn draw_enabled_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(24, 102, 616, 190), rgb(255, 255, 255));
+        draw_card(hdc, UiRect::new(18, 92, 618, 182), rgb(255, 255, 252));
         draw_text(
             hdc,
             "NUMLOCK CONTROL",
-            UiRect::new(40, 118, 410, 138),
+            UiRect::new(34, 106, 420, 124),
             11,
             700,
             rgb(128, 128, 125),
@@ -890,7 +890,7 @@ impl App {
             } else {
                 "Numlon is paused"
             },
-            UiRect::new(40, 140, 500, 168),
+            UiRect::new(34, 128, 500, 154),
             20,
             700,
             rgb(28, 28, 30),
@@ -903,7 +903,7 @@ impl App {
             } else {
                 "Keyboard state remains untouched"
             },
-            UiRect::new(40, 168, 500, 186),
+            UiRect::new(34, 154, 500, 172),
             12,
             400,
             rgb(104, 104, 102),
@@ -913,11 +913,11 @@ impl App {
     }
 
     unsafe fn draw_mode_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(24, 206, 616, 376), rgb(255, 255, 255));
+        draw_card(hdc, UiRect::new(18, 192, 618, 348), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Behavior",
-            UiRect::new(40, 220, 300, 242),
+            UiRect::new(34, 206, 300, 228),
             15,
             700,
             rgb(28, 28, 30),
@@ -943,24 +943,27 @@ impl App {
     }
 
     unsafe fn draw_hotkey_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(24, 392, 616, 484), rgb(255, 255, 255));
+        draw_card(hdc, UiRect::new(18, 360, 618, 438), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Toggle shortcut",
-            UiRect::new(40, 408, 260, 430),
+            UiRect::new(34, 374, 260, 396),
             15,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
         );
+        let hotkey_display = self.state.hotkey.display();
+        let hotkey_text = if self.capturing_hotkey {
+            "Press shortcut now. Esc cancels."
+        } else {
+            hotkey_display.as_str()
+        };
+
         draw_text(
             hdc,
-            if self.capturing_hotkey {
-                "Press shortcut now. Esc cancels."
-            } else {
-                &self.state.hotkey.display()
-            },
-            UiRect::new(40, 438, 458, 464),
+            hotkey_text,
+            UiRect::new(34, 402, 452, 424),
             14,
             if self.capturing_hotkey { 700 } else { 500 },
             if self.capturing_hotkey {
@@ -983,11 +986,11 @@ impl App {
     }
 
     unsafe fn draw_startup_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(24, 500, 616, 580), rgb(255, 255, 255));
+        draw_card(hdc, UiRect::new(18, 450, 618, 528), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Start with Windows",
-            UiRect::new(40, 516, 420, 540),
+            UiRect::new(34, 464, 420, 486),
             15,
             700,
             rgb(28, 28, 30),
@@ -1002,7 +1005,7 @@ impl App {
             } else {
                 "Keep executable in final folder before enabling"
             },
-            UiRect::new(40, 544, 500, 566),
+            UiRect::new(34, 490, 500, 512),
             12,
             400,
             rgb(104, 104, 102),
@@ -1016,11 +1019,11 @@ impl App {
     }
 
     unsafe fn draw_updates_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(24, 596, 616, 676), rgb(255, 255, 255));
+        draw_card(hdc, UiRect::new(18, 540, 618, 618), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Updates",
-            UiRect::new(40, 612, 240, 636),
+            UiRect::new(34, 554, 240, 576),
             15,
             700,
             rgb(28, 28, 30),
@@ -1031,7 +1034,7 @@ impl App {
             draw_text(
                 hdc,
                 "Disabled in dev builds — no GitHub API requests.",
-                UiRect::new(40, 640, 580, 662),
+                UiRect::new(34, 582, 580, 604),
                 12,
                 400,
                 rgb(104, 104, 102),
@@ -1047,7 +1050,7 @@ impl App {
             } else {
                 "Stable channel"
             },
-            UiRect::new(40, 640, 390, 662),
+            UiRect::new(34, 582, 390, 604),
             12,
             400,
             rgb(104, 104, 102),
@@ -1070,7 +1073,7 @@ impl App {
         draw_text(
             hdc,
             &self.status,
-            UiRect::new(28, 696, 492, 742),
+            UiRect::new(28, 654, 476, 700),
             11,
             400,
             rgb(96, 96, 93),
@@ -1203,31 +1206,31 @@ unsafe extern "system" fn window_proc(
 
 unsafe fn style_window(hwnd: HWND) {
     let corner = DWMWCP_ROUND;
-    let caption = rgb(247, 247, 244);
+    let caption = rgb(243, 243, 240);
     let border = rgb(226, 226, 220);
     let text = rgb(28, 28, 30);
 
     let _ = DwmSetWindowAttribute(
         hwnd,
-        DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWA_WINDOW_CORNER_PREFERENCE as u32,
         &corner as *const _ as *const _,
         mem::size_of_val(&corner) as u32,
     );
     let _ = DwmSetWindowAttribute(
         hwnd,
-        DWMWA_CAPTION_COLOR,
+        DWMWA_CAPTION_COLOR as u32,
         &caption as *const _ as *const _,
         mem::size_of_val(&caption) as u32,
     );
     let _ = DwmSetWindowAttribute(
         hwnd,
-        DWMWA_BORDER_COLOR,
+        DWMWA_BORDER_COLOR as u32,
         &border as *const _ as *const _,
         mem::size_of_val(&border) as u32,
     );
     let _ = DwmSetWindowAttribute(
         hwnd,
-        DWMWA_TEXT_COLOR,
+        DWMWA_TEXT_COLOR as u32,
         &text as *const _ as *const _,
         mem::size_of_val(&text) as u32,
     );
@@ -1237,10 +1240,10 @@ unsafe fn draw_header(hdc: HDC) {
     DrawIconEx(
         hdc,
         28,
-        24,
+        18,
         load_app_icon(),
-        52,
-        52,
+        56,
+        56,
         0,
         ptr::null_mut(),
         DI_NORMAL,
@@ -1248,7 +1251,7 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Numlon",
-        UiRect::new(94, 24, 410, 52),
+        UiRect::new(94, 22, 410, 48),
         22,
         700,
         rgb(28, 28, 30),
@@ -1257,7 +1260,7 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Tiny keypad control, without LED drama.",
-        UiRect::new(94, 56, 470, 78),
+        UiRect::new(94, 50, 470, 72),
         12,
         400,
         rgb(104, 104, 102),
@@ -1265,13 +1268,13 @@ unsafe fn draw_header(hdc: HDC) {
     );
     draw_pill(
         hdc,
-        UiRect::new(500, 30, 610, 62),
+        UiRect::new(496, 24, 604, 56),
         &config::app_version_label(),
     );
 }
 
 unsafe fn draw_card(hdc: HDC, rect: UiRect, fill: COLORREF) {
-    draw_rounded_rect(hdc, rect, 18, fill, rgb(229, 229, 224));
+    draw_rounded_rect(hdc, rect, 24, fill, rgb(230, 230, 226));
 }
 
 unsafe fn draw_choice_row(
@@ -1283,16 +1286,16 @@ unsafe fn draw_choice_row(
     enabled: bool,
 ) {
     let fill = if selected {
-        rgb(255, 250, 225)
+        rgb(255, 248, 214)
     } else {
         rgb(250, 250, 248)
     };
     let border = if selected {
-        rgb(250, 204, 21)
+        rgb(255, 200, 32)
     } else {
-        rgb(232, 232, 228)
+        rgb(235, 235, 232)
     };
-    draw_rounded_rect(hdc, rect, 13, fill, border);
+    draw_rounded_rect(hdc, rect, 16, fill, border);
     draw_radio(hdc, UiRect::new(rect.left + 14, rect.top + 16, rect.left + 34, rect.top + 36), selected);
 
     let title_color = if enabled {
@@ -1328,16 +1331,16 @@ unsafe fn draw_choice_row(
 
 unsafe fn draw_switch(hdc: HDC, rect: UiRect, enabled: bool) {
     let track = if enabled {
-        rgb(250, 204, 21)
+        rgb(255, 200, 32)
     } else {
         rgb(214, 214, 210)
     };
-    draw_rounded_rect(hdc, rect, 18, track, track);
+    draw_rounded_rect(hdc, rect, 20, track, track);
 
     let knob_left = if enabled {
-        rect.right - 27
-    } else {
-        rect.left + 3
+        rect.right - 28
+     } else {
+        rect.left + 4
     };
     draw_ellipse(
         hdc,
@@ -1352,12 +1355,12 @@ unsafe fn draw_radio(hdc: HDC, rect: UiRect, selected: bool) {
         hdc,
         rect,
         if selected {
-            rgb(250, 204, 21)
+            rgb(255, 200, 32)
         } else {
             rgb(255, 255, 255)
         },
         if selected {
-            rgb(250, 204, 21)
+            rgb(255, 200, 32)
         } else {
             rgb(190, 190, 186)
         },
@@ -1375,16 +1378,16 @@ unsafe fn draw_radio(hdc: HDC, rect: UiRect, selected: bool) {
 
 unsafe fn draw_button(hdc: HDC, rect: UiRect, text: &str, primary: bool) {
     let fill = if primary {
-        rgb(250, 204, 21)
+        rgb(255, 200, 32)
     } else {
-        rgb(242, 242, 238)
+        rgb(246, 246, 243)
     };
     let border = if primary {
-        rgb(250, 204, 21)
+        rgb(255, 200, 32)
     } else {
-        rgb(222, 222, 217)
+        rgb(230, 230, 226)
     };
-    draw_rounded_rect(hdc, rect, 12, fill, border);
+    draw_rounded_rect(hdc, rect, 16, fill, border);
     draw_text(
         hdc,
         text,
@@ -1404,9 +1407,9 @@ unsafe fn draw_pill(hdc: HDC, rect: UiRect, text: &str) {
     draw_rounded_rect(
         hdc,
         rect,
-        16,
-        rgb(255, 249, 214),
-        rgb(250, 221, 91),
+        18,
+        rgb(255, 250, 225),
+        rgb(255, 215, 84),
     );
     draw_text(
         hdc,
@@ -1500,7 +1503,7 @@ unsafe fn draw_text(
         SelectObject(hdc, font as HGDIOBJ)
     };
 
-    SetBkMode(hdc, TRANSPARENT);
+    SetBkMode(hdc, TRANSPARENT as i32);
     SetTextColor(hdc, color);
 
     let mut text = str_wide_null(text);
