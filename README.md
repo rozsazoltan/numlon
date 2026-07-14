@@ -229,7 +229,7 @@ Development builds open main window automatically. Production manual launches op
 
 Closing window hides Numlon to tray. Use tray menu **Quit Numlon** to stop process.
 
-Only one Numlon instance can run. Starting another copy activates existing window and exits new process.
+Only one Numlon instance can run. Starting another copy activates the existing window when possible and shows a native notice. The notice identifies development-versus-production conflicts and tells the user to quit the running instance from the tray before retrying.
 
 ## Architecture
 

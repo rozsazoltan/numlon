@@ -20,9 +20,10 @@ mod win_app;
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     let _guard = match single_instance::acquire()? {
-        Some(guard) => guard,
-        None => {
-            win_app::activate_existing_instance();
+        single_instance::AcquireOutcome::Acquired(guard) => guard,
+        single_instance::AcquireOutcome::AlreadyRunning(existing_build) => {
+            win_app::activate_existing_instance(existing_build);
+            single_instance::show_already_running_notice(existing_build);
             return Ok(());
         }
     };
