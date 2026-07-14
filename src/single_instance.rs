@@ -167,7 +167,7 @@ fn build_window_exists(build_kind: BuildKind) -> bool {
     let Some(title) = build_kind.window_title() else {
         return false;
     };
-    let title = str_wide_null(title);
+    let title = str_wide_null(&title);
 
     !unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) }.is_null()
 }

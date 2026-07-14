@@ -75,7 +75,7 @@ pub fn activate_existing_instance(existing_build: BuildKind) {
     let title = existing_build
         .window_title()
         .unwrap_or_else(config::window_title);
-    let title = str_wide_null(title);
+    let title = str_wide_null(&title);
 
     for _ in 0..20 {
         let hwnd = unsafe { FindWindowW(ptr::null(), title.as_ptr()) };
