@@ -86,7 +86,7 @@ fn disable() -> Result<()> {
 
 fn startup_command() -> Result<Vec<u16>> {
     let exe = env::current_exe().context("failed to resolve current executable path")?;
-    let command = format!("\"{}\"", exe.display());
+    let command = format!("\"{}\" --startup", exe.display());
     Ok(wide_null(command))
 }
 

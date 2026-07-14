@@ -1,18 +1,19 @@
 # numlon
 
-`numlon` is a tiny Windows tray app that keeps NumLock in charge. It keeps NumLock enabled in the background so the numeric keypad keeps typing numbers, even after NumLock is turned off accidentally.
+`numlon` is a tiny Windows tray app that keeps NumLock in charge. It can keep NumLock enabled, or keep the NumLock LED off while remapping the numpad navigation keys back to digits.
 
 - [What it does](#what-it-does)
-  - [NumLock guard](#numlock-guard)
-  - [Hotkey](#hotkey)
+  - [NumLock modes](#numlock-modes)
+  - [Shortcut](#shortcut)
   - [Tray mode](#tray-mode)
   - [Startup](#startup)
   - [Updates](#updates)
   - [Design assets](#design-assets)
 - [Get started](#get-started)
 - [Usage](#usage)
-  - [Toggle always-on mode](#toggle-always-on-mode)
-  - [Use the tray menu](#use-the-tray-menu)
+  - [Choose behavior](#choose-behavior)
+  - [Change shortcut](#change-shortcut)
+  - [Use tray menu](#use-tray-menu)
   - [Enable startup](#enable-startup)
   - [Check for updates](#check-for-updates)
 - [Window behavior](#window-behavior)
@@ -24,55 +25,89 @@
 
 ## What it does
 
-Numlon runs as a small Windows tray utility. Its default behavior is simple: keep NumLock enabled while the always-on feature is active.
+Numlon runs as a small Windows tray utility with two behavior modes.
 
-### NumLock guard
+### NumLock modes
 
-Numlon checks the NumLock state on a short interval. If NumLock is off and always-on mode is enabled, Numlon turns it back on through normal Windows keyboard input APIs.
+**Keep NumLock on** restores NumLock whenever another app, keyboard, or accidental key press turns it off.
 
-It does not install a low-level keyboard hook, does not capture typed keys, does not log input, and does not require administrator privileges.
+**Keep LED off, type digits** keeps NumLock disabled and remaps numpad navigation events to digit characters:
 
-### Hotkey
+```text
+Insert      -> 0
+End         -> 1
+Down        -> 2
+Page Down   -> 3
+Left        -> 4
+Clear       -> 5
+Right       -> 6
+Home        -> 7
+Up          -> 8
+Page Up     -> 9
+Delete      -> .
+```
 
-Press `Win+Alt+Home` to toggle always-on mode.
+Dedicated navigation-cluster keys keep their normal behavior. Numlon distinguishes them from numpad navigation events through the Windows extended-key flag.
 
-When always-on mode is disabled, Numlon leaves NumLock alone. Press the hotkey again to resume enforcement.
+The remap does not store typed content. It only inspects virtual-key metadata needed to recognize numpad navigation events.
+
+### Shortcut
+
+Default global shortcut:
+
+```text
+Win+Alt+Home
+```
+
+Open Numlon and choose **Change** to record another shortcut. Numlon validates the new global shortcut before saving it.
+
+The shortcut is stored next to the executable in `.numlon-data/config.json`.
 
 ### Tray mode
 
-Numlon lives in the Windows notification area. The tray icon supports a right-click menu with actions for opening the small control window, toggling always-on mode, toggling startup, checking updates, opening GitHub Releases, installing an available update, and exiting the app.
+Numlon lives in Windows notification area. Yellow tray icon opens app on left click. Paused state switches tray icon to monochrome. Right click menu provides:
 
-The main window is intentionally minimal. Closing the window hides Numlon back to tray instead of exiting it.
+- enabled state
+- behavior mode
+- shortcut change
+- startup state
+- release update actions
+- quit
 
 ### Startup
 
-Startup is optional. On first launch, Numlon asks whether it should start with Windows.
+Startup is optional. On first production launch, Numlon asks whether it should start with Windows.
 
-Before enabling startup, move `numlon.exe` to its final folder. Do not move it afterward. Windows stores the exact executable path in the current user's startup registry entry, so moving the file later breaks startup until the setting is disabled and enabled again.
+Before enabling startup, move `numlon.exe` to its final folder. Do not move it afterward. Windows stores exact executable path in current-user startup registry entry.
+
+Startup launches Numlon with `--startup`, keeping main window hidden while tray service starts.
 
 ### Updates
 
-Numlon checks GitHub releases for `rozsazoltan/numlon` and can replace the current Windows executable when a newer build is available.
+Production builds check GitHub releases for `rozsazoltan/numlon`.
 
-Stable releases are checked by default. Prerelease watching can be enabled from the app window. When prerelease watching is disabled, Numlon returns to stable release checks.
+Stable releases are default. Prerelease channel can be enabled in app window or tray menu. Automatic production checks run at most once per hour.
 
-Release builds perform a background update check at most once per hour. Manual checks are available from the app window and tray menu.
+Development builds perform no automatic or manual GitHub API update checks.
 
 ### Design assets
 
-Numlon uses yellow as its primary accent color.
+Primary accent:
 
 ```text
-Primary accent:
-  #FACC15
+#FACC15
 ```
 
-Executable and tray icon assets live in:
+Executable and tray icon assets:
 
 ```text
 assets/numlon.ico
 assets/numlon-icon-source.png
+assets/numlon-paused.ico
+assets/numlon-paused-icon-source.png
 ```
+
+`build.rs` embeds `assets/numlon.ico` into Windows executable.
 
 ## Get started
 
@@ -82,71 +117,106 @@ Recommended layout:
 numlon/
 ├─ numlon.exe
 └─ .numlon-data/
-   └─ state.json
+   └─ config.json
 ```
 
-Move `numlon.exe` to its final folder, run it, then choose whether startup should be enabled.
+Move `numlon.exe` to final folder, run it, choose behavior, shortcut, and startup preference.
 
 ## Usage
 
-### Toggle always-on mode
+### Choose behavior
 
-Use `Win+Alt+Home`, the app window, or the tray menu.
+Open Numlon from tray and select:
 
-When always-on mode is active, Numlon restores NumLock if it becomes disabled. When always-on mode is paused, Numlon does not change NumLock.
+```text
+Keep NumLock on
+```
 
-### Use the tray menu
+or:
 
-Right-click the Numlon tray icon to access common actions:
+```text
+Keep LED off, type digits
+```
 
-- open the app window
-- enable or disable always-on mode
-- enable or disable startup
-- check updates
-- install an available update
-- open GitHub Releases
-- exit Numlon
+Main enable switch pauses or resumes selected behavior. Global shortcut toggles same state.
+
+### Change shortcut
+
+1. Open Numlon.
+2. Select **Change** beside current shortcut.
+3. Press new shortcut.
+4. Press `Esc` to cancel.
+
+If Windows rejects shortcut because another app owns it, Numlon restores previous shortcut.
+
+### Use tray menu
+
+Left click yellow tray icon to open Numlon.
+
+Right click for enabled state, behavior, shortcut, startup, updates, and quit.
 
 ### Enable startup
 
-Use the first-run prompt, the app window, or the tray menu.
+Use first-run prompt, app window, or tray menu.
 
-Startup is written only for the current Windows user under:
+Startup registry location:
 
 ```text
 HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 ```
 
-The startup command points to the current `numlon.exe` path.
+Production startup command points to current executable and adds:
+
+```text
+--startup
+```
 
 ### Check for updates
 
-Use **Check updates** from the app window or tray menu.
+Production only. Use update card or tray menu.
 
-Numlon looks for a Windows executable asset in the latest GitHub release. Preferred asset names are:
+Preferred Windows release asset names:
 
 ```text
 numlon-windows-x64.exe
 numlon.exe
 ```
 
-Prerelease watching uses the newest non-draft prerelease version. Stable mode uses GitHub's latest stable release endpoint.
+Prerelease mode selects newest non-draft prerelease. Stable mode uses latest stable release.
 
 ## Window behavior
 
-Numlon opens a small native Windows control window. Closing the window hides it to tray. Use **Exit** from the tray menu to stop the app.
+Numlon uses native Windows APIs with custom card-based UI, rounded Windows 11 frame, yellow accent, and embedded icon.
 
-Only one Numlon instance can run at a time. Starting a second copy exits immediately.
+Development build title includes current package version and `dev`, for example:
+
+```text
+Numlon v0.1.0-dev
+```
+
+Production title:
+
+```text
+Numlon v0.1.0
+```
+
+Development builds open main window automatically. Production manual launches open it; startup launches stay in tray.
+
+Closing window hides Numlon to tray. Use tray menu **Quit Numlon** to stop process.
+
+Only one Numlon instance can run. Starting another copy activates existing window and exits new process.
 
 ## Data location
 
-Numlon stores app data next to the executable:
+Numlon stores app data next to executable:
 
 ```text
-.numlon-data/state.json
+.numlon-data/config.json
 ```
 
-The data folder can be overridden for development or portable testing:
+Config includes selected mode, enabled state, shortcut, startup UI state, update channel, window position, and status.
+
+Development or portable testing override:
 
 ```powershell
 $env:NUMLON_APP_DATA_DIR = "C:\path\to\numlon-data"
@@ -156,27 +226,29 @@ $env:NUMLON_APP_DATA_DIR = "C:\path\to\numlon-data"
 
 Numlon is Windows-only.
 
-Numlon keeps NumLock enabled; it does not remap numpad keys when always-on mode is disabled.
+LED-off digit mode uses `WH_KEYBOARD_LL` only to distinguish numpad navigation events. `SendInput` is subject to Windows integrity boundaries, so remapping may not reach elevated applications when Numlon runs unelevated.
 
-Some remote desktop, virtual machine, BIOS, firmware, or keyboard-driver setups may manage NumLock independently. In those environments, Numlon can only restore the Windows-visible NumLock state.
+Unicode digit injection works in standard desktop text inputs. Software that reads raw keyboard scan codes may ignore remapped characters.
 
-Self-update replaces the executable in place. The folder containing `numlon.exe` must be writable by the current user.
+Some remote desktop, virtual machine, BIOS, firmware, or keyboard-driver setups can manage NumLock independently.
 
-For stronger release security, published update assets should be code-signed and/or shipped with a detached signature that Numlon verifies before replacement.
+Self-update replaces executable in place. Executable folder must be writable by current user.
+
+Published update assets should be code-signed and/or accompanied by detached signatures verified before replacement.
 
 ## Contributing
 
-Issues and pull requests are welcome. Keep changes small, focused, and easy to review.
+Issues and pull requests are welcome. Keep changes small, focused, testable, and easy to review.
 
 ## License & Acknowledgments
 
 Copyright (C) 2020–present [Zoltán Rózsa](https://github.com/rozsazoltan)
 
-Numlon uses Rust and Windows APIs to provide a minimal tray-based NumLock guard.
+Numlon uses Rust and native Windows APIs to provide minimal tray-based NumLock control.
 
 ## Development runner
 
-Run the development watcher without `cargo-watch`:
+Run project-local development watcher:
 
 ```powershell
 scripts\dev.ps1
@@ -188,17 +260,24 @@ Or:
 scripts\dev.cmd
 ```
 
-On Unix-like shells:
+Unix-like shell:
 
 ```sh
 scripts/dev.sh
 ```
 
-The dev runner builds `numlon`, starts it, watches source files, and restarts the app after changes.
+Dev runner builds `numlon`, opens app window, watches source and asset files, stops previous child process, and restarts after changes.
+
+Development builds:
+
+- open app window automatically
+- include `-dev` in title version
+- never call GitHub update API
+- cannot enable Windows startup
 
 ### WSL source and Windows runtime
 
-Recommended Windows desktop development layout:
+Recommended layout:
 
 ```text
 WSL source:
@@ -208,38 +287,28 @@ Windows mirror:
   D:\github\rozsazoltan\numlon
 ```
 
-Keep Git operations on the WSL source workspace. Use the Windows mirror only for native Windows build and runtime testing. Do not build or run the Windows app directly from `\\wsl$`.
+Keep Git operations in WSL source workspace. Use Windows mirror only for native Windows build and runtime testing. Do not build or run app directly from `\\wsl$`.
 
-Create the Mutagen sync session once from Windows PowerShell. Run the script from the WSL UNC path so the WSL project becomes the source:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "\\wsl$\Ubuntu\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1"
-```
-
-Replace `Ubuntu` with your WSL distribution name, for example `CentOS-Stream-9`.
-
-If your distro name is different, list it with:
+Create Mutagen session once from Windows PowerShell:
 
 ```powershell
-wsl -l -v
+powershell -ExecutionPolicy Bypass -File "\\wsl$\CentOS-Stream-9\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1"
 ```
 
-Then run daily Windows dev from the native mirror:
+Daily Windows dev:
 
 ```powershell
 cd D:\github\rozsazoltan\numlon
 scripts\dev-win.ps1
 ```
 
-The setup script defaults to `one-way-replica`, with WSL as the source and Windows as the mirror. Use `two-way-safe` only if you also edit files in the Windows mirror:
+Setup defaults to `one-way-replica`, WSL source and Windows mirror. Use `two-way-safe` only when editing Windows mirror too:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "\\wsl$\Ubuntu\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1" -SyncMode two-way-safe
+powershell -ExecutionPolicy Bypass -File "\\wsl$\CentOS-Stream-9\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1" -SyncMode two-way-safe
 ```
 
-Replace `Ubuntu` with your WSL distribution name, for example `CentOS-Stream-9`.
-
-Useful Mutagen commands:
+Useful commands:
 
 ```powershell
 mutagen sync list
@@ -248,4 +317,4 @@ mutagen sync flush numlon-win-dev
 mutagen sync terminate numlon-win-dev
 ```
 
-Preferred pattern: create once, flush often, monitor when something looks wrong, terminate only when the session is broken or no longer needed.
+Preferred pattern: create once, flush often, monitor when something looks wrong, terminate only when session is broken or no longer needed.

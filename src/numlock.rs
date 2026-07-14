@@ -9,11 +9,19 @@ pub fn is_numlock_on() -> bool {
 }
 
 pub fn ensure_numlock_on() -> Result<bool> {
-    if is_numlock_on() {
+    ensure_numlock_state(true).context("failed to turn NumLock on")
+}
+
+pub fn ensure_numlock_off() -> Result<bool> {
+    ensure_numlock_state(false).context("failed to turn NumLock off")
+}
+
+fn ensure_numlock_state(target: bool) -> Result<bool> {
+    if is_numlock_on() == target {
         return Ok(false);
     }
 
-    tap_numlock().context("failed to turn NumLock on")?;
+    tap_numlock()?;
     Ok(true)
 }
 

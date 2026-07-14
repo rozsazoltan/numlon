@@ -2,7 +2,11 @@ use anyhow::{Context, Result};
 use reqwest::{blocking::Client, StatusCode};
 use semver::Version;
 use serde::{de::DeserializeOwned, Deserialize};
-use std::{env, fs, path::{Path, PathBuf}, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const RELEASES_API: &str = "https://api.github.com/repos/rozsazoltan/numlon/releases";
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/rozsazoltan/numlon/releases/latest";
@@ -33,7 +37,16 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
+fn ensure_updates_enabled() -> Result<()> {
+    if cfg!(debug_assertions) {
+        anyhow::bail!("updates are disabled in development builds");
+    }
+    Ok(())
+}
+
 pub fn check_for_update(include_prereleases: bool) -> Result<UpdateCheck> {
+    ensure_updates_enabled()?;
+
     if include_prereleases {
         check_latest_prerelease()
     } else {
@@ -42,12 +55,14 @@ pub fn check_for_update(include_prereleases: bool) -> Result<UpdateCheck> {
 }
 
 pub fn check_latest_stable() -> Result<UpdateCheck> {
+    ensure_updates_enabled()?;
     let client = http_client()?;
     let release: GitHubRelease = get_github_json(&client, LATEST_RELEASE_API, "GitHub latest stable release")?;
     update_check_from_release(release)
 }
 
 pub fn check_latest_prerelease() -> Result<UpdateCheck> {
+    ensure_updates_enabled()?;
     let client = http_client()?;
     let releases: Vec<GitHubRelease> = get_github_json(&client, RELEASES_API, "GitHub releases")?;
     let mut candidates = releases
@@ -122,6 +137,8 @@ where
 }
 
 pub fn install_update(check: &UpdateCheck) -> Result<()> {
+    ensure_updates_enabled()?;
+
     let Some(download_url) = check.asset_download_url.as_ref() else {
         anyhow::bail!("the selected release does not contain a Windows executable asset");
     };
