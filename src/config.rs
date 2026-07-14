@@ -15,17 +15,12 @@ const CONFIG_FILE_NAME: &str = "config.json";
 const LEGACY_STATE_FILE_NAME: &str = "state.json";
 const BACKUP_FILE_NAME: &str = "config.json.bak";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NumlockMode {
+    #[default]
     ForceOn,
     LedOffDigits,
-}
-
-impl Default for NumlockMode {
-    fn default() -> Self {
-        Self::ForceOn
-    }
 }
 
 impl NumlockMode {

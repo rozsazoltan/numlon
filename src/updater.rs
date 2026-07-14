@@ -195,7 +195,7 @@ pub fn install_update(check: &UpdateCheck) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn launch_windows_replacer(current_exe: &PathBuf, new_exe: &PathBuf) -> Result<()> {
+fn launch_windows_replacer(current_exe: &Path, new_exe: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -251,7 +251,7 @@ fn powershell_single_quoted_path(path: &Path) -> String {
 }
 
 #[cfg(not(windows))]
-fn launch_windows_replacer(_current_exe: &PathBuf, _new_exe: &PathBuf) -> Result<()> {
+fn launch_windows_replacer(_current_exe: &Path, _new_exe: &Path) -> Result<()> {
     anyhow::bail!("self-update replacement is currently implemented for Windows builds only")
 }
 
