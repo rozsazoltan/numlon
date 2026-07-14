@@ -176,14 +176,36 @@ Production startup command points to current executable and adds:
 
 Production only. Use update card or tray menu.
 
-Preferred Windows release asset names:
+Release workflow publishes versioned Windows assets:
 
 ```text
-numlon-windows-x64.exe
-numlon.exe
+numlon-v<version>-windows-x64.exe
 ```
 
+Updater also accepts legacy fallback names ending in `windows-x64.exe` or `numlon.exe`.
+
 Prerelease mode selects newest non-draft prerelease. Stable mode uses latest stable release.
+
+### Publish a release
+
+Run GitHub Actions workflow **Release** manually. Provide semantic version without `v` prefix and choose prerelease flag.
+
+Workflow matches Audio Orbit release flow:
+
+1. Validate semantic version and reject existing tag/release branch.
+2. Create temporary `chore/release-v<version>` branch from default branch.
+3. Update `Cargo.toml`, `Cargo.lock`, and Windows manifest version.
+4. Commit and push version metadata.
+5. Squash merge release branch into default branch.
+6. Delete temporary release branch.
+7. Build `x86_64-pc-windows-msvc` executable from merged commit.
+8. Publish versioned executable and generated GitHub release notes.
+
+Example asset:
+
+```text
+numlon-v0.2.0-windows-x64.exe
+```
 
 ## Window behavior
 
