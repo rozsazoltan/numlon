@@ -57,7 +57,8 @@ pub fn check_for_update(include_prereleases: bool) -> Result<UpdateCheck> {
 pub fn check_latest_stable() -> Result<UpdateCheck> {
     ensure_updates_enabled()?;
     let client = http_client()?;
-    let release: GitHubRelease = get_github_json(&client, LATEST_RELEASE_API, "GitHub latest stable release")?;
+    let release: GitHubRelease =
+        get_github_json(&client, LATEST_RELEASE_API, "GitHub latest stable release")?;
     update_check_from_release(release)
 }
 
@@ -84,15 +85,32 @@ pub fn check_latest_prerelease() -> Result<UpdateCheck> {
 
 fn update_check_from_release(release: GitHubRelease) -> Result<UpdateCheck> {
     let current_version = env!("CARGO_PKG_VERSION").to_owned();
-    let current_semver = Version::parse(&current_version).context("invalid current application version")?;
-    let latest_semver = parse_release_version(&release.tag_name).context("invalid latest GitHub release version")?;
+    let current_semver =
+        Version::parse(&current_version).context("invalid current application version")?;
+    let latest_semver = parse_release_version(&release.tag_name)
+        .context("invalid latest GitHub release version")?;
     let asset = release
         .assets
         .iter()
         .find(|asset| asset.name.eq_ignore_ascii_case("numlon-windows-x64.exe"))
-        .or_else(|| release.assets.iter().find(|asset| asset.name.ends_with("windows-x64.exe")))
-        .or_else(|| release.assets.iter().find(|asset| asset.name.eq_ignore_ascii_case("numlon.exe")))
-        .or_else(|| release.assets.iter().find(|asset| asset.name.ends_with(".exe")));
+        .or_else(|| {
+            release
+                .assets
+                .iter()
+                .find(|asset| asset.name.ends_with("windows-x64.exe"))
+        })
+        .or_else(|| {
+            release
+                .assets
+                .iter()
+                .find(|asset| asset.name.eq_ignore_ascii_case("numlon.exe"))
+        })
+        .or_else(|| {
+            release
+                .assets
+                .iter()
+                .find(|asset| asset.name.ends_with(".exe"))
+        });
 
     Ok(UpdateCheck {
         current_version,
@@ -105,7 +123,8 @@ fn update_check_from_release(release: GitHubRelease) -> Result<UpdateCheck> {
 }
 
 fn parse_release_version(value: &str) -> Result<Version> {
-    Version::parse(value.trim_start_matches('v')).with_context(|| format!("invalid release version: {value}"))
+    Version::parse(value.trim_start_matches('v'))
+        .with_context(|| format!("invalid release version: {value}"))
 }
 
 fn http_client() -> Result<Client> {
@@ -180,7 +199,10 @@ fn launch_windows_replacer(current_exe: &PathBuf, new_exe: &PathBuf) -> Result<(
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let update_dir = new_exe.parent().map(PathBuf::from).unwrap_or_else(env::temp_dir);
+    let update_dir = new_exe
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir);
     let script = update_dir.join("numlon-update.ps1");
     let script_contents = format!(
         "$ErrorActionPreference = 'SilentlyContinue'\r\n\

@@ -131,7 +131,11 @@ fn app_executable_path(root: &Path) -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
 
-    let exe_name = if cfg!(windows) { "numlon.exe" } else { "numlon" };
+    let exe_name = if cfg!(windows) {
+        "numlon.exe"
+    } else {
+        "numlon"
+    };
     target_dir.join("debug").join(exe_name)
 }
 
@@ -162,9 +166,9 @@ fn collect_fingerprint(path: &Path, fingerprint: &mut FileFingerprint) {
     if metadata.is_file() {
         fingerprint.files = fingerprint.files.saturating_add(1);
         fingerprint.bytes = fingerprint.bytes.saturating_add(metadata.len());
-        fingerprint.modified_nanos = fingerprint
-            .modified_nanos
-            .max(system_time_to_nanos(metadata.modified().unwrap_or(UNIX_EPOCH)));
+        fingerprint.modified_nanos = fingerprint.modified_nanos.max(system_time_to_nanos(
+            metadata.modified().unwrap_or(UNIX_EPOCH),
+        ));
         return;
     }
 

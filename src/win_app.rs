@@ -1,20 +1,14 @@
 use anyhow::{Context as _, Result};
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Sense, Stroke};
-use global_hotkey::{
-    hotkey::HotKey,
-    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
-};
+use global_hotkey::{hotkey::HotKey, GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use std::{
-    env,
-    ptr,
+    env, ptr,
     sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant},
 };
 use tray_icon::{
-    menu::{
-        CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
-    },
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
     Icon as TrayImage, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 use windows_sys::Win32::{
@@ -82,7 +76,14 @@ pub fn activate_existing_instance() {
         let hwnd = unsafe { FindWindowW(ptr::null(), title.as_ptr()) };
         if !hwnd.is_null() {
             unsafe {
-                ShowWindow(hwnd, if IsIconic(hwnd) != 0 { SW_RESTORE } else { SW_SHOW });
+                ShowWindow(
+                    hwnd,
+                    if IsIconic(hwnd) != 0 {
+                        SW_RESTORE
+                    } else {
+                        SW_SHOW
+                    },
+                );
                 SetForegroundWindow(hwnd);
             }
             return;
@@ -97,10 +98,7 @@ pub fn run() -> Result<()> {
     let viewport = egui::ViewportBuilder::default()
         .with_title(config::window_title())
         .with_inner_size([DEFAULT_WINDOW_WIDTH, CONTENT_WINDOW_HEIGHT])
-        .with_min_inner_size([
-            FALLBACK_MIN_WINDOW_WIDTH,
-            FALLBACK_MIN_WINDOW_HEIGHT,
-        ])
+        .with_min_inner_size([FALLBACK_MIN_WINDOW_WIDTH, FALLBACK_MIN_WINDOW_HEIGHT])
         .with_resizable(true)
         .with_visible(visible)
         .with_icon(icon);
@@ -116,9 +114,7 @@ pub fn run() -> Result<()> {
     eframe::run_native(
         config::app_name(),
         options,
-        Box::new(move |creation_context| {
-            Ok(Box::new(NumlonApp::new(creation_context, visible)))
-        }),
+        Box::new(move |creation_context| Ok(Box::new(NumlonApp::new(creation_context, visible)))),
     )
     .map_err(|error| anyhow::anyhow!("failed to run Numlon UI: {error}"))
 }
@@ -139,13 +135,8 @@ impl TrayState {
         let menu = Menu::new();
         let open = MenuItem::with_id(MENU_OPEN, "Open Numlon", true, None);
         let separator_after_open = PredefinedMenuItem::separator();
-        let toggle = CheckMenuItem::with_id(
-            MENU_TOGGLE,
-            "Enabled",
-            true,
-            state.always_enabled,
-            None,
-        );
+        let toggle =
+            CheckMenuItem::with_id(MENU_TOGGLE, "Enabled", true, state.always_enabled, None);
 
         let force = CheckMenuItem::with_id(
             MENU_FORCE,
@@ -199,20 +190,9 @@ impl TrayState {
                 None,
             );
             let check = MenuItem::with_id(MENU_CHECK, "Check for updates", true, None);
-            let install = MenuItem::with_id(
-                MENU_INSTALL,
-                "Install available update",
-                false,
-                None,
-            );
+            let install = MenuItem::with_id(MENU_INSTALL, "Install available update", false, None);
             let releases = MenuItem::with_id(MENU_RELEASES, "Open releases", true, None);
-            menu.append_items(&[
-                &separator_updates,
-                &prerelease,
-                &check,
-                &install,
-                &releases,
-            ])?;
+            menu.append_items(&[&separator_updates, &prerelease, &check, &install, &releases])?;
             (Some(prerelease), Some(install))
         };
 
@@ -225,7 +205,9 @@ impl TrayState {
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
             .with_menu_on_right_click(true)
-            .with_icon(load_tray_image(include_bytes!("../assets/numlon-tray.png"))?)
+            .with_icon(load_tray_image(include_bytes!(
+                "../assets/numlon-tray.png"
+            ))?)
             .with_tooltip(tray_tooltip(state))
             .build()?;
 
@@ -288,10 +270,7 @@ struct NumlonApp {
 }
 
 impl NumlonApp {
-    fn new(
-        creation_context: &eframe::CreationContext<'_>,
-        window_visible: bool,
-    ) -> Self {
+    fn new(creation_context: &eframe::CreationContext<'_>, window_visible: bool) -> Self {
         configure_egui(&creation_context.egui_ctx);
 
         let mut state = config::load_state();
@@ -352,11 +331,13 @@ impl NumlonApp {
         app.apply_runtime_mode();
         app.maybe_start_auto_update_check();
         app.sync_tray();
-        creation_context.egui_ctx.request_repaint_after(if window_visible {
-            VISIBLE_EVENT_POLL_INTERVAL
-        } else {
-            HIDDEN_EVENT_POLL_INTERVAL
-        });
+        creation_context
+            .egui_ctx
+            .request_repaint_after(if window_visible {
+                VISIBLE_EVENT_POLL_INTERVAL
+            } else {
+                HIDDEN_EVENT_POLL_INTERVAL
+            });
         app
     }
 
@@ -457,7 +438,8 @@ impl NumlonApp {
             NumlockMode::LedOffDigits => {
                 if self.keyboard_hook.is_none() {
                     KeyboardHook::set_remap_active(false);
-                    self.status = "LED-off digit mode unavailable: keyboard hook failed.".to_owned();
+                    self.status =
+                        "LED-off digit mode unavailable: keyboard hook failed.".to_owned();
                     return;
                 }
                 if let Err(error) = numlock::ensure_numlock_off() {
@@ -1005,7 +987,11 @@ fn mode_option(
     enabled: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 54.0), Sense::click());
-    let response = if enabled { response } else { response.on_disabled_hover_text("Unavailable") };
+    let response = if enabled {
+        response
+    } else {
+        response.on_disabled_hover_text("Unavailable")
+    };
     let fill = if selected { YELLOW_SOFT } else { SURFACE_MUTED };
     let stroke = if selected {
         Stroke::new(1.0, YELLOW)
@@ -1019,8 +1005,11 @@ fn mode_option(
 
     let radio_center = egui::pos2(rect.left() + 20.0, rect.center().y);
     ui.painter().circle_filled(radio_center, 9.0, SURFACE);
-    ui.painter()
-        .circle_stroke(radio_center, 9.0, Stroke::new(1.0, if selected { YELLOW } else { BORDER }));
+    ui.painter().circle_stroke(
+        radio_center,
+        9.0,
+        Stroke::new(1.0, if selected { YELLOW } else { BORDER }),
+    );
     if selected {
         ui.painter().circle_filled(radio_center, 4.0, GRAPHITE);
     }
@@ -1161,10 +1150,18 @@ fn setting_row(
 fn toggle_switch(ui: &mut egui::Ui, on: bool, enabled: bool) -> egui::Response {
     let size = egui::vec2(48.0, 28.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let response = if enabled { response } else { response.on_disabled_hover_text("Unavailable") };
+    let response = if enabled {
+        response
+    } else {
+        response.on_disabled_hover_text("Unavailable")
+    };
     let animation = ui.ctx().animate_bool(response.id, on);
     let track = if enabled {
-        if on { YELLOW } else { Color32::from_rgb(206, 207, 204) }
+        if on {
+            YELLOW
+        } else {
+            Color32::from_rgb(206, 207, 204)
+        }
     } else {
         Color32::from_rgb(220, 220, 217)
     };

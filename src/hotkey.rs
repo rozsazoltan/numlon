@@ -102,8 +102,6 @@ impl HotkeyBinding {
             .parse()
             .map_err(|error| format!("Invalid shortcut {}: {error}", self.display()))
     }
-
-
 }
 
 fn default_key() -> String {

@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    env,
-    fs,
+    env, fs,
     io::Write,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -150,9 +149,7 @@ fn read_state_from_path(path: &Path) -> Result<SavedState> {
 
 pub fn save_state(state: &SavedState) -> Result<()> {
     let path = state_path()?;
-    let parent = path
-        .parent()
-        .context("failed to resolve config folder")?;
+    let parent = path.parent().context("failed to resolve config folder")?;
     fs::create_dir_all(parent)
         .with_context(|| format!("failed to create data folder: {}", parent.display()))?;
 
