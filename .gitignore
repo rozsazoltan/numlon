@@ -1,0 +1,8 @@
+/target/
+/.cache/
+/.numlon-data/
+*.pdb
+*.exe
+*.tmp
+*.bak
+.DS_Store
