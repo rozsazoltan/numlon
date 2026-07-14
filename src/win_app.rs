@@ -1524,45 +1524,44 @@ unsafe fn draw_switch(hdc: HDC, rect: UiRect, enabled: bool) {
     let track = if enabled {
         rgb(255, 200, 32)
     } else {
-        rgb(214, 214, 210)
+        rgb(205, 205, 202)
     };
-    draw_rounded_rect(hdc, rect, 16, track, track);
+    let track_radius = (rect.bottom - rect.top) / 2;
+    draw_filled_rounded_rect(hdc, rect, track_radius, track);
 
+    let knob_size = 24;
+    let knob_top = rect.top + ((rect.bottom - rect.top - knob_size) / 2);
     let knob_left = if enabled {
-        rect.right - 28
-     } else {
+        rect.right - knob_size - 4
+    } else {
         rect.left + 4
     };
-    draw_ellipse(
+    draw_filled_ellipse(
         hdc,
-        UiRect::new(knob_left, rect.top + 4, knob_left + 22, rect.bottom - 4),
-        rgb(255, 255, 255),
+        UiRect::new(
+            knob_left,
+            knob_top,
+            knob_left + knob_size,
+            knob_top + knob_size,
+        ),
         rgb(255, 255, 255),
     );
 }
 
 unsafe fn draw_radio(hdc: HDC, rect: UiRect, selected: bool) {
-    draw_ellipse(
-        hdc,
-        rect,
-        if selected {
-            rgb(255, 200, 32)
-        } else {
-            rgb(255, 255, 255)
-        },
-        if selected {
-            rgb(255, 200, 32)
-        } else {
-            rgb(190, 190, 186)
-        },
-    );
-
     if selected {
-        draw_ellipse(
+        draw_filled_ellipse(hdc, rect, rgb(255, 200, 32));
+        draw_filled_ellipse(
             hdc,
             UiRect::new(rect.left + 6, rect.top + 6, rect.right - 6, rect.bottom - 6),
-            rgb(82, 63, 0),
-            rgb(82, 63, 0),
+            rgb(63, 52, 18),
+        );
+    } else {
+        draw_filled_ellipse(hdc, rect, rgb(180, 180, 177));
+        draw_filled_ellipse(
+            hdc,
+            UiRect::new(rect.left + 2, rect.top + 2, rect.right - 2, rect.bottom - 2),
+            rgb(255, 255, 255),
         );
     }
 }
@@ -1611,6 +1610,42 @@ unsafe fn draw_pill(hdc: HDC, rect: UiRect, text: &str) {
         rgb(91, 69, 0),
         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
     );
+}
+
+unsafe fn draw_filled_rounded_rect(
+    hdc: HDC,
+    rect: UiRect,
+    radius: i32,
+    fill: COLORREF,
+) {
+    if crate::gdi_plus::fill_rounded_rect(
+        hdc,
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+        radius,
+        fill,
+    ) {
+        return;
+    }
+
+    draw_rounded_rect(hdc, rect, radius, fill, fill);
+}
+
+unsafe fn draw_filled_ellipse(hdc: HDC, rect: UiRect, fill: COLORREF) {
+    if crate::gdi_plus::fill_ellipse(
+        hdc,
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+        fill,
+    ) {
+        return;
+    }
+
+    draw_ellipse(hdc, rect, fill, fill);
 }
 
 unsafe fn draw_rounded_rect(

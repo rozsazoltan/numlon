@@ -9,7 +9,8 @@ const STATUS_OK: i32 = 0;
 const FILL_MODE_ALTERNATE: i32 = 0;
 const UNIT_PIXEL: i32 = 2;
 const SMOOTHING_MODE_ANTI_ALIAS_8X8: i32 = 6;
-const PIXEL_OFFSET_MODE_HIGH_QUALITY: i32 = 2;
+const PIXEL_OFFSET_MODE_HALF: i32 = 4;
+const COMPOSITING_QUALITY_GAMMA_CORRECTED: i32 = 3;
 
 #[repr(C)]
 struct GdiplusStartupInput {
@@ -123,6 +124,79 @@ pub unsafe fn draw_ellipse(
         && GdipDrawEllipse(graphics.raw, pen.raw, x, y, width, height) == STATUS_OK
 }
 
+pub unsafe fn fill_rounded_rect(
+    hdc: HDC,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    radius: i32,
+    fill: COLORREF,
+) -> bool {
+    let width = right - left;
+    let height = bottom - top;
+    if hdc.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+
+    let Some(graphics) = Graphics::create(hdc) else {
+        return false;
+    };
+    graphics.configure();
+
+    let width = width as f32;
+    let height = height as f32;
+    let radius = (radius.max(1) as f32).min(width / 2.0).min(height / 2.0);
+
+    let Some(path) = PathHandle::rounded_rect(
+        left as f32,
+        top as f32,
+        width,
+        height,
+        radius,
+    ) else {
+        return false;
+    };
+    let Some(brush) = Brush::create(colorref_to_argb(fill)) else {
+        return false;
+    };
+
+    GdipFillPath(graphics.raw, brush.raw.cast(), path.raw) == STATUS_OK
+}
+
+pub unsafe fn fill_ellipse(
+    hdc: HDC,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    fill: COLORREF,
+) -> bool {
+    let width = right - left;
+    let height = bottom - top;
+    if hdc.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+
+    let Some(graphics) = Graphics::create(hdc) else {
+        return false;
+    };
+    graphics.configure();
+
+    let Some(brush) = Brush::create(colorref_to_argb(fill)) else {
+        return false;
+    };
+
+    GdipFillEllipse(
+        graphics.raw,
+        brush.raw.cast(),
+        left as f32,
+        top as f32,
+        width as f32,
+        height as f32,
+    ) == STATUS_OK
+}
+
 fn colorref_to_argb(color: COLORREF) -> u32 {
     let red = color & 0xff;
     let green = (color >> 8) & 0xff;
@@ -143,7 +217,11 @@ impl Graphics {
 
     unsafe fn configure(&self) {
         let _ = GdipSetSmoothingMode(self.raw, SMOOTHING_MODE_ANTI_ALIAS_8X8);
-        let _ = GdipSetPixelOffsetMode(self.raw, PIXEL_OFFSET_MODE_HIGH_QUALITY);
+        let _ = GdipSetPixelOffsetMode(self.raw, PIXEL_OFFSET_MODE_HALF);
+        let _ = GdipSetCompositingQuality(
+            self.raw,
+            COMPOSITING_QUALITY_GAMMA_CORRECTED,
+        );
     }
 }
 
@@ -276,6 +354,7 @@ unsafe extern "system" {
     fn GdipDeleteGraphics(graphics: *mut c_void) -> i32;
     fn GdipSetSmoothingMode(graphics: *mut c_void, smoothing_mode: i32) -> i32;
     fn GdipSetPixelOffsetMode(graphics: *mut c_void, pixel_offset_mode: i32) -> i32;
+    fn GdipSetCompositingQuality(graphics: *mut c_void, compositing_quality: i32) -> i32;
 
     fn GdipCreateSolidFill(color: u32, brush: *mut *mut c_void) -> i32;
     fn GdipDeleteBrush(brush: *mut c_void) -> i32;
