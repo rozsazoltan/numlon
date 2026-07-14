@@ -34,15 +34,16 @@ use windows_sys::Win32::{
             DestroyWindow, DispatchMessageW, DrawIconEx, FindWindowW, GetClientRect, GetCursorPos,
             GetMessageW, GetWindowLongPtrW, GetWindowRect, IsIconic, LoadCursorW, LoadIconW,
             MessageBoxW,
-            PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetMenuDefaultItem,
-            SetTimer, SetWindowLongPtrW, ShowWindow, TrackPopupMenu, TranslateMessage,
-            CW_USEDEFAULT, DI_NORMAL, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION,
-            MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG,
-            SW_HIDE, SW_RESTORE, SW_SHOW, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND,
-            WM_DESTROY, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
-            WM_NCDESTROY,
-            WM_PAINT, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSW, WS_CAPTION,
-            WS_EX_APPWINDOW, WS_OVERLAPPED, WS_SYSMENU,
+            PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow,
+            SetMenuDefaultItem, SetTimer, SetWindowLongPtrW, ShowWindow, TrackPopupMenu,
+            TranslateMessage, CW_USEDEFAULT, DI_NORMAL, GWLP_USERDATA, HMENU, ICON_BIG,
+            ICON_SMALL, IDC_ARROW, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_POPUP,
+            MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, SW_HIDE, SW_RESTORE, SW_SHOW,
+            TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_ERASEBKGND,
+            WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NCDESTROY, WM_PAINT,
+            WM_RBUTTONUP, WM_SETICON, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSW, WS_CAPTION,
+            WS_EX_APPWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+            WS_THICKFRAME,
         },
     },
 };
@@ -70,7 +71,7 @@ const UPDATE_POLL_INTERVAL_MS: u32 = 250;
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
 const WINDOW_WIDTH: i32 = 612;
-const WINDOW_HEIGHT: i32 = 608;
+const WINDOW_HEIGHT: i32 = 596;
 
 const MENU_OPEN: usize = 2001;
 const MENU_TOGGLE_ENABLED: usize = 2002;
@@ -84,14 +85,14 @@ const MENU_INSTALL_UPDATE: usize = 2009;
 const MENU_OPEN_RELEASES: usize = 2010;
 const MENU_EXIT: usize = 2011;
 
-const ENABLED_SWITCH: UiRect = UiRect::new(520, 104, 578, 136);
-const MODE_FORCE_ROW: UiRect = UiRect::new(28, 206, 582, 250);
-const MODE_LED_ROW: UiRect = UiRect::new(28, 256, 582, 300);
-const HOTKEY_BUTTON: UiRect = UiRect::new(450, 336, 578, 374);
-const STARTUP_SWITCH: UiRect = UiRect::new(520, 418, 578, 450);
-const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(520, 502, 578, 534);
-const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(418, 506, 506, 544);
-const HIDE_BUTTON: UiRect = UiRect::new(470, 560, 586, 596);
+const ENABLED_SWITCH: UiRect = UiRect::new(520, 98, 578, 130);
+const MODE_FORCE_ROW: UiRect = UiRect::new(28, 186, 582, 226);
+const MODE_LED_ROW: UiRect = UiRect::new(28, 232, 582, 272);
+const HOTKEY_BUTTON: UiRect = UiRect::new(450, 302, 578, 338);
+const STARTUP_SWITCH: UiRect = UiRect::new(520, 370, 578, 402);
+const UPDATE_CHANNEL_SWITCH: UiRect = UiRect::new(520, 442, 578, 474);
+const UPDATE_ACTION_BUTTON: UiRect = UiRect::new(418, 446, 506, 482);
+const HIDE_BUTTON: UiRect = UiRect::new(470, 540, 586, 574);
 
 pub fn started_from_startup() -> bool {
     env::args_os().any(|argument| argument == "--startup")
@@ -113,6 +114,8 @@ pub fn activate_existing_instance() {
 }
 
 pub fn run() -> Result<()> {
+    let _gdi_plus = crate::gdi_plus::Session::start();
+
     unsafe {
         let instance = GetModuleHandleW(ptr::null());
         let class_name = str_wide_null(CLASS_NAME);
@@ -149,7 +152,7 @@ pub fn run() -> Result<()> {
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
             x,
             y,
             WINDOW_WIDTH,
@@ -165,6 +168,7 @@ pub fn run() -> Result<()> {
         }
 
         style_window(hwnd);
+        set_window_icons(hwnd);
 
         let mut app = Box::new(App::new(hwnd, initial_state));
         app.sync_startup_state();
@@ -873,12 +877,12 @@ impl App {
     }
 
     unsafe fn draw_enabled_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 82, 594, 156), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 76, 594, 146), rgb(255, 255, 252));
         draw_text(
             hdc,
             "NUMLOCK CONTROL",
-            UiRect::new(30, 96, 420, 114),
-            11,
+            UiRect::new(28, 88, 400, 104),
+            10,
             700,
             rgb(128, 128, 125),
             DT_LEFT | DT_SINGLELINE,
@@ -890,8 +894,8 @@ impl App {
             } else {
                 "Numlon is paused"
             },
-            UiRect::new(30, 116, 468, 140),
-            20,
+            UiRect::new(28, 106, 420, 128),
+            18,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
@@ -903,8 +907,8 @@ impl App {
             } else {
                 "Keyboard state remains untouched"
             },
-            UiRect::new(30, 138, 468, 152),
-            12,
+            UiRect::new(28, 128, 420, 142),
+            10,
             400,
             rgb(104, 104, 102),
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -913,12 +917,12 @@ impl App {
     }
 
     unsafe fn draw_mode_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 168, 594, 312), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 156, 594, 284), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Behavior",
-            UiRect::new(30, 182, 300, 204),
-            15,
+            UiRect::new(28, 168, 300, 186),
+            13,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
@@ -943,12 +947,12 @@ impl App {
     }
 
     unsafe fn draw_hotkey_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 324, 594, 396), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 292, 594, 350), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Toggle shortcut",
-            UiRect::new(30, 338, 260, 358),
-            15,
+            UiRect::new(28, 304, 260, 322),
+            13,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
@@ -963,8 +967,8 @@ impl App {
         draw_text(
             hdc,
             hotkey_text,
-            UiRect::new(30, 360, 404, 382),
-            14,
+            UiRect::new(28, 324, 404, 340),
+            13,
             if self.capturing_hotkey { 700 } else { 500 },
             if self.capturing_hotkey {
                 rgb(118, 88, 0)
@@ -986,12 +990,12 @@ impl App {
     }
 
     unsafe fn draw_startup_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 408, 594, 480), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 360, 594, 418), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Start with Windows",
-            UiRect::new(30, 422, 420, 442),
-            15,
+            UiRect::new(28, 372, 420, 390),
+            13,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
@@ -1005,8 +1009,8 @@ impl App {
             } else {
                 "Keep executable in final folder before enabling"
             },
-            UiRect::new(30, 444, 470, 466),
-            12,
+            UiRect::new(28, 392, 470, 408),
+            10,
             400,
             rgb(104, 104, 102),
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -1019,12 +1023,12 @@ impl App {
     }
 
     unsafe fn draw_updates_card(&self, hdc: HDC) {
-        draw_card(hdc, UiRect::new(16, 492, 594, 564), rgb(255, 255, 252));
+        draw_card(hdc, UiRect::new(16, 430, 594, 490), rgb(255, 255, 252));
         draw_text(
             hdc,
             "Updates",
-            UiRect::new(30, 506, 240, 526),
-            15,
+            UiRect::new(28, 442, 240, 460),
+            13,
             700,
             rgb(28, 28, 30),
             DT_LEFT | DT_SINGLELINE,
@@ -1034,8 +1038,8 @@ impl App {
             draw_text(
                 hdc,
                 "Disabled in dev builds — no GitHub API requests.",
-                UiRect::new(30, 528, 396, 548),
-                12,
+                UiRect::new(28, 462, 392, 478),
+                10,
                 400,
                 rgb(104, 104, 102),
                 DT_LEFT | DT_SINGLELINE,
@@ -1050,8 +1054,8 @@ impl App {
             } else {
                 "Stable channel"
             },
-            UiRect::new(30, 528, 356, 548),
-            12,
+            UiRect::new(28, 462, 344, 478),
+            10,
             400,
             rgb(104, 104, 102),
             DT_LEFT | DT_SINGLELINE,
@@ -1073,8 +1077,8 @@ impl App {
         draw_text(
             hdc,
             &self.status,
-            UiRect::new(24, 566, 430, 594),
-            11,
+            UiRect::new(24, 516, 430, 574),
+            10,
             400,
             rgb(96, 96, 93),
             DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS,
@@ -1204,6 +1208,14 @@ unsafe extern "system" fn window_proc(
     }
 }
 
+
+unsafe fn set_window_icons(hwnd: HWND) {
+    let large_icon = load_app_icon();
+    let small_icon = load_app_icon();
+    SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, large_icon as isize);
+    SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, small_icon as isize);
+}
+
 unsafe fn style_window(hwnd: HWND) {
     let corner = DWMWCP_ROUND;
     let caption = rgb(243, 243, 240);
@@ -1239,11 +1251,11 @@ unsafe fn style_window(hwnd: HWND) {
 unsafe fn draw_header(hdc: HDC) {
     DrawIconEx(
         hdc,
-        24,
-        16,
+        20,
+        14,
         load_app_icon(),
-        48,
-        48,
+        44,
+        44,
         0,
         ptr::null_mut(),
         DI_NORMAL,
@@ -1251,8 +1263,8 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Numlon",
-        UiRect::new(84, 18, 360, 42),
-        22,
+        UiRect::new(78, 16, 360, 40),
+        20,
         700,
         rgb(28, 28, 30),
         DT_LEFT | DT_SINGLELINE,
@@ -1260,7 +1272,7 @@ unsafe fn draw_header(hdc: HDC) {
     draw_text(
         hdc,
         "Tiny keypad control, without LED drama.",
-        UiRect::new(84, 44, 430, 64),
+        UiRect::new(78, 40, 430, 58),
         12,
         400,
         rgb(104, 104, 102),
@@ -1268,13 +1280,13 @@ unsafe fn draw_header(hdc: HDC) {
     );
     draw_pill(
         hdc,
-        UiRect::new(462, 20, 586, 52),
+        UiRect::new(458, 18, 586, 48),
         &config::app_version_label(),
     );
 }
 
 unsafe fn draw_card(hdc: HDC, rect: UiRect, fill: COLORREF) {
-    draw_rounded_rect(hdc, rect, 24, fill, rgb(230, 230, 226));
+    draw_rounded_rect(hdc, rect, 20, fill, rgb(230, 230, 226));
 }
 
 unsafe fn draw_choice_row(
@@ -1295,7 +1307,7 @@ unsafe fn draw_choice_row(
     } else {
         rgb(235, 235, 232)
     };
-    draw_rounded_rect(hdc, rect, 16, fill, border);
+    draw_rounded_rect(hdc, rect, 14, fill, border);
     draw_radio(hdc, UiRect::new(rect.left + 14, rect.top + 16, rect.left + 34, rect.top + 36), selected);
 
     let title_color = if enabled {
@@ -1335,7 +1347,7 @@ unsafe fn draw_switch(hdc: HDC, rect: UiRect, enabled: bool) {
     } else {
         rgb(214, 214, 210)
     };
-    draw_rounded_rect(hdc, rect, 20, track, track);
+    draw_rounded_rect(hdc, rect, 16, track, track);
 
     let knob_left = if enabled {
         rect.right - 28
@@ -1344,7 +1356,7 @@ unsafe fn draw_switch(hdc: HDC, rect: UiRect, enabled: bool) {
     };
     draw_ellipse(
         hdc,
-        UiRect::new(knob_left, rect.top + 3, knob_left + 24, rect.bottom - 3),
+        UiRect::new(knob_left, rect.top + 4, knob_left + 22, rect.bottom - 4),
         rgb(255, 255, 255),
         rgb(255, 255, 255),
     );
@@ -1387,7 +1399,7 @@ unsafe fn draw_button(hdc: HDC, rect: UiRect, text: &str, primary: bool) {
     } else {
         rgb(230, 230, 226)
     };
-    draw_rounded_rect(hdc, rect, 16, fill, border);
+    draw_rounded_rect(hdc, rect, 14, fill, border);
     draw_text(
         hdc,
         text,
@@ -1429,6 +1441,19 @@ unsafe fn draw_rounded_rect(
     fill: COLORREF,
     border: COLORREF,
 ) {
+    if crate::gdi_plus::draw_rounded_rect(
+        hdc,
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+        radius,
+        fill,
+        border,
+    ) {
+        return;
+    }
+
     let brush = CreateSolidBrush(fill);
     let pen = CreatePen(PS_SOLID, 1, border);
     let old_brush = SelectObject(hdc, brush as HGDIOBJ);
@@ -1440,8 +1465,8 @@ unsafe fn draw_rounded_rect(
         rect.top,
         rect.right,
         rect.bottom,
-        radius,
-        radius,
+        radius * 2,
+        radius * 2,
     );
 
     SelectObject(hdc, old_pen);
@@ -1451,6 +1476,18 @@ unsafe fn draw_rounded_rect(
 }
 
 unsafe fn draw_ellipse(hdc: HDC, rect: UiRect, fill: COLORREF, border: COLORREF) {
+    if crate::gdi_plus::draw_ellipse(
+        hdc,
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+        fill,
+        border,
+    ) {
+        return;
+    }
+
     let brush = CreateSolidBrush(fill);
     let pen = CreatePen(PS_SOLID, 1, border);
     let old_brush = SelectObject(hdc, brush as HGDIOBJ);
