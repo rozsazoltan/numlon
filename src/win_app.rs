@@ -9,17 +9,23 @@ use windows_sys::Win32::{
     Graphics::Gdi::HBRUSH,
     System::LibraryLoader::GetModuleHandleW,
     UI::{
-        Input::KeyboardAndMouse::{MOD_ALT, MOD_NOREPEAT, MOD_WIN, VK_HOME},
-        Shell::{Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW},
+        Input::KeyboardAndMouse::{
+            RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_NOREPEAT, MOD_WIN, VK_HOME,
+        },
+        Shell::{
+            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+            NOTIFYICONDATAW,
+        },
         WindowsAndMessaging::{
             AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-            DestroyWindow, DispatchMessageW, GetCursorPos, GetDlgItem, GetMessageW, GetWindowLongPtrW, LoadCursorW, LoadIconW,
-            MessageBoxW, PostQuitMessage, RegisterClassW, RegisterHotKey, SetForegroundWindow,
-            SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TrackPopupMenu, TranslateMessage,
-            UnregisterHotKey, COLOR_WINDOW, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION, MF_SEPARATOR,
-            MF_STRING, MSG, SW_HIDE, SW_SHOW, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE,
-            WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_TIMER,
-            WNDCLASSW, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+            DestroyWindow, DispatchMessageW, GetCursorPos, GetDlgItem, GetMessageW,
+            GetWindowLongPtrW, LoadCursorW, LoadIconW, MessageBoxW, PostQuitMessage,
+            RegisterClassW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
+            ShowWindow, TrackPopupMenu, TranslateMessage, GWLP_USERDATA, HMENU, IDC_ARROW,
+            IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, SW_SHOW, TPM_RIGHTBUTTON,
+            WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK,
+            WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW,
+            WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
         },
     },
 };
@@ -35,13 +41,15 @@ const WINDOW_TITLE: &str = "Numlon";
 const WM_TRAY_ICON: u32 = WM_APP + 1;
 const TRAY_ID: u32 = 1;
 const HOTKEY_TOGGLE_ALWAYS: i32 = 1;
+const APP_ICON_RESOURCE_ID: u16 = 1;
+const COLOR_WINDOW_INDEX: usize = 5;
 const TIMER_ENFORCE: usize = 1;
 const TIMER_POLL_UPDATES: usize = 2;
 const ENFORCE_INTERVAL_MS: u32 = 350;
 const UPDATE_POLL_INTERVAL_MS: u32 = 250;
 const AUTO_UPDATE_INTERVAL_SECONDS: u64 = 60 * 60;
 
-const ID_STATUS: isize = 1000;
+const ID_STATUS: usize = 1000;
 const ID_ALWAYS: usize = 1001;
 const ID_STARTUP: usize = 1002;
 const ID_PRERELEASES: usize = 1003;
@@ -70,9 +78,9 @@ pub fn run() -> Result<()> {
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: instance,
-            hIcon: LoadIconW(ptr::null_mut(), IDI_APPLICATION),
+            hIcon: load_app_icon(),
             hCursor: LoadCursorW(ptr::null_mut(), IDC_ARROW),
-            hbrBackground: (COLOR_WINDOW + 1) as isize as HBRUSH,
+            hbrBackground: (COLOR_WINDOW_INDEX + 1) as isize as HBRUSH,
             lpszMenuName: ptr::null(),
             lpszClassName: class_name.as_ptr(),
         };
@@ -237,7 +245,7 @@ impl App {
         data.uID = TRAY_ID;
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         data.uCallbackMessage = WM_TRAY_ICON;
-        data.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
+        data.hIcon = load_app_icon();
         copy_wide_truncated(
             &mut data.szTip,
             if self.state.always_enabled { "Numlon: always-on" } else { "Numlon: paused" },
@@ -484,7 +492,9 @@ impl App {
             }
             ID_HIDE => self.hide_window(),
             MENU_OPEN => self.show_window(),
-            MENU_EXIT => DestroyWindow(self.hwnd),
+            MENU_EXIT => {
+                DestroyWindow(self.hwnd);
+            }
             _ => {}
         }
     }
@@ -560,12 +570,26 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
     }
 }
 
+unsafe fn load_app_icon() -> *mut std::ffi::c_void {
+    let instance = GetModuleHandleW(ptr::null());
+    let icon = LoadIconW(instance, make_int_resource(APP_ICON_RESOURCE_ID));
+    if icon.is_null() {
+        LoadIconW(ptr::null_mut(), IDI_APPLICATION)
+    } else {
+        icon
+    }
+}
+
+fn make_int_resource(id: u16) -> *const u16 {
+    id as usize as *const u16
+}
+
 unsafe fn app_from_hwnd(hwnd: HWND) -> Option<&'static mut App> {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
     ptr.as_mut()
 }
 
-unsafe fn create_static(parent: HWND, id: isize, x: i32, y: i32, width: i32, height: i32, text: &str) {
+unsafe fn create_static(parent: HWND, id: usize, x: i32, y: i32, width: i32, height: i32, text: &str) {
     let class = str_wide_null("STATIC");
     let text = str_wide_null(text);
     CreateWindowExW(
@@ -603,7 +627,7 @@ unsafe fn create_button(parent: HWND, id: usize, x: i32, y: i32, width: i32, hei
     );
 }
 
-unsafe fn set_control_text(parent: HWND, id: isize, text: &str) {
+unsafe fn set_control_text(parent: HWND, id: usize, text: &str) {
     let control = GetDlgItem(parent, id as i32);
     if !control.is_null() {
         let text = str_wide_null(text);

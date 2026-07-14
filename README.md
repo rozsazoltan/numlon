@@ -8,6 +8,7 @@
   - [Tray mode](#tray-mode)
   - [Startup](#startup)
   - [Updates](#updates)
+  - [Design assets](#design-assets)
 - [Get started](#get-started)
 - [Usage](#usage)
   - [Toggle always-on mode](#toggle-always-on-mode)
@@ -56,6 +57,22 @@ Numlon checks GitHub releases for `rozsazoltan/numlon` and can replace the curre
 Stable releases are checked by default. Prerelease watching can be enabled from the app window. When prerelease watching is disabled, Numlon returns to stable release checks.
 
 Release builds perform a background update check at most once per hour. Manual checks are available from the app window and tray menu.
+
+### Design assets
+
+Numlon uses yellow as its primary accent color.
+
+```text
+Primary accent:
+  #FACC15
+```
+
+Executable and tray icon assets live in:
+
+```text
+assets/numlon.ico
+assets/numlon-icon-source.png
+```
 
 ## Get started
 
@@ -197,9 +214,9 @@ Create the Mutagen sync session once from Windows PowerShell. Run the script fro
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "\\wsl$\Ubuntu\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1"
+```
 
 Replace `Ubuntu` with your WSL distribution name, for example `CentOS-Stream-9`.
-```
 
 If your distro name is different, list it with:
 
@@ -217,10 +234,10 @@ scripts\dev-win.ps1
 The setup script defaults to `one-way-replica`, with WSL as the source and Windows as the mirror. Use `two-way-safe` only if you also edit files in the Windows mirror:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "\\wsl$\Ubuntu\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1"
-
-Replace `Ubuntu` with your WSL distribution name, for example `CentOS-Stream-9`. -SyncMode two-way-safe
+powershell -ExecutionPolicy Bypass -File "\\wsl$\Ubuntu\github\rozsazoltan\numlon\scripts\setup-mutagen-wsl-dev.ps1" -SyncMode two-way-safe
 ```
+
+Replace `Ubuntu` with your WSL distribution name, for example `CentOS-Stream-9`.
 
 Useful Mutagen commands:
 

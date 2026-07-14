@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 
@@ -36,5 +36,4 @@ pub fn acquire() -> Result<Option<SingleInstanceGuard>> {
     }
 
     Ok(Some(SingleInstanceGuard { handle }))
-        .context("failed to acquire single-instance guard")
 }
